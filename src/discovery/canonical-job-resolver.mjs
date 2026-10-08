@@ -1,0 +1,6 @@
+import {createHash} from "node:crypto";
+const clean=v=>String(v||"").normalize("NFD").replace(/\p{Diacritic}/gu,"").toLowerCase().replace(/\s+/g," ").trim();
+const urlKey=value=>{try{const url=new URL(value);url.hash="";for(const key of [...url.searchParams.keys()])if(/^(utm_|ref|source|trk)/i.test(key))url.searchParams.delete(key);return url.toString().replace(/\/$/,"");}catch{return "";}};
+export class CanonicalJobResolver{
+  resolve(job){const ats=clean(job.atsType),org=clean(job.companyIdentity),id=clean(job.providerJobId);if(ats&&ats!=="unknown"&&org&&id)return {key:`ats:${ats}:${org}:${id}`,strategy:"ATS_ORG_JOB_ID",confidence:1};if(job.provider&&id)return {key:`provider:${clean(job.provider)}:${id}`,strategy:"PROVIDER_STABLE_ID",confidence:.97};const direct=urlKey(job.applicationUrl||job.canonicalUrl);if(direct)return {key:`url:${createHash("sha256").update(direct).digest("hex")}`,strategy:"CANONICAL_APPLICATION_URL",confidence:.92};const signature=[clean(job.company),clean(job.title),clean(job.location),clean(job.postedAt)].join("|");return {key:`signature:${createHash("sha256").update(signature).digest("hex")}`,strategy:job.postedAt?"STRONG_SIGNATURE":"HEURISTIC_SIGNATURE",confidence:job.postedAt?.8:.62};}
+}

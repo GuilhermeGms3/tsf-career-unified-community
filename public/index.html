@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#111815" />
+    <meta
+      name="description"
+      content="Career Unified — descubra, avalie, prepare, candidate-se e acompanhe sua jornada profissional."
+    />
+    <title>Career Unified</title>
+    <script src="/app/theme-init.js"></script>
+    <link rel="stylesheet" href="/styles/tokens.css" />
+    <link rel="stylesheet" href="/styles/base.css" />
+    <link rel="stylesheet" href="/styles/layout.css" />
+    <link rel="stylesheet" href="/styles/components.css" />
+    <link rel="stylesheet" href="/styles/features.css" />
+    <link rel="stylesheet" href="/styles/opportunity-workspace.css" />
+    <link rel="stylesheet" href="/styles/resume-preview.css" />
+    <link rel="stylesheet" href="/styles/core-pages.css" />
+    <link rel="stylesheet" href="/styles/responsive.css" />
+    <link rel="stylesheet" href="/styles/resume-batch.css" />
+    <link rel="stylesheet" href="/styles/connections-observability.css" />
+    <link rel="stylesheet" href="/styles/utilities.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#app-content">Pular para o conteúdo</a>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="Navegação principal">
+        <a class="brand" href="/" data-link aria-label="TSF Career — Hoje"
+          ><span class="brand-mark" aria-hidden="true">TSF</span
+          ><span><strong>TSF</strong><strong>Career</strong></span></a
+        >
+        <nav class="primary-nav" aria-label="Jornada"></nav>
+        <div class="sidebar-foot">
+          <span class="avatar" aria-hidden="true">TSF</span
+          ><span
+            ><strong>Ambiente local</strong
+            ><small>Seus dados ficam sob seu controle</small></span
+          ><button
+            class="theme-toggle"
+            type="button"
+            data-theme-toggle
+            aria-label="Alternar tema"
+          ></button>
+        </div>
+      </aside>
+      <header class="mobile-bar">
+        <a class="brand compact" href="/" data-link
+          ><span class="brand-mark">TSF</span><strong>TSF Career</strong></a
+        ><div class="mobile-actions">
+          <button
+            class="icon-button mobile-theme-toggle"
+            type="button"
+            data-theme-toggle
+            aria-label="Alternar tema"
+          ></button
+          ><button
+            class="icon-button"
+            id="mobile-nav-toggle"
+            type="button"
+            aria-expanded="false"
+            aria-controls="mobile-nav"
+          >
+            Menu
+          </button>
+        </div>
+      </header>
+      <nav
+        id="mobile-nav"
+        class="mobile-nav"
+        aria-label="Navegação móvel"
+        hidden
+      ></nav>
+      <main id="app-content" tabindex="-1">
+        <div class="route-loading" role="status">
+          <span class="spinner"></span>
+          <p>Organizando sua jornada…</p>
+        </div>
+      </main>
+    </div>
+    <div
+      id="toast-region"
+      class="toast-region"
+      aria-live="polite"
+      aria-atomic="true"
+    ></div>
+    <div id="background-job-region" class="background-job-region" hidden></div>
+    <aside id="resume-queue-panel" class="resume-queue-panel" aria-label="Fila de preparação de currículos" hidden></aside>
+    <button id="resume-queue-reopen" class="resume-queue-reopen" type="button" aria-controls="resume-queue-panel" hidden>Ver fila de currículos</button>
+    <div class="route-progress" data-route-progress role="progressbar" aria-label="Carregando página" hidden><span></span></div>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,2 @@
+export const HIRING_INTENT_TAXONOMY=Object.freeze({version:"2026-08-22",terms:{"pt-BR":["estamos contratando","venha para o time","oportunidade de trabalho","vaga aberta","processo seletivo","trabalhe conosco","estágio"],en:["we are hiring","join our team","job opening","open position","careers","internship"]}});
+export function hiringIntentTerms(languages=["pt-BR","en"]){return [...new Set(languages.flatMap(language=>HIRING_INTENT_TAXONOMY.terms[language]||[]))];}

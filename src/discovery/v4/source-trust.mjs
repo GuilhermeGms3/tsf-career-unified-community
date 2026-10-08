@@ -1,0 +1,2 @@
+const tiers={STRUCTURED_ATS:"A",OFFICIAL_CAREER_PAGE:"A",JOB_BOARD:"B",PUBLIC_WEB:"C",NEWS_BLOG_HIRING_SIGNAL:"C",PUBLIC_SOCIAL_SIGNAL:"D",RECRUITER_PUBLIC_SIGNAL:"D",COMMUNITY_WHATSAPP_GROUP:"D",MANUAL_LEAD_CAPTURE:"D",INTERNSHIP_PORTAL:"C",CONSULTANCY_STAFFING:"C",EXTERNAL_FORM:"C"};
+export function sourceTrust(sourceClass,{official=false}={}){return {tier:official?"A":tiers[sourceClass]||"E",reason:official?"Origem oficial confirmada":`Classificação conservadora para ${sourceClass||"origem desconhecida"}`};}

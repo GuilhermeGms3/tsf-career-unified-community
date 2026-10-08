@@ -1,0 +1,9 @@
+.git
+node_modules
+data/*
+!data/.gitkeep
+resources/*
+!resources/.gitkeep
+*.png
+*.log
+.env*

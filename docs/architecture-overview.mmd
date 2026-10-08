@@ -1,0 +1,37 @@
+flowchart TD
+  U["Candidato"] --> UI["Experience V2 · ES Modules"]
+  UI --> ROUTER["Router + Deep Links"]
+  ROUTER --> READ["ExperienceService · Read Models"]
+  READ --> NEXT["Next Action Engine · determinístico"]
+  READ --> DB
+  UI --> SI["Search Intent"]
+  SI --> QE["Query Expansion + Budget"]
+  QE --> SRC["Discovery Sources"]
+  QE --> WEB["Public Web API · Brave"]
+  WEB --> LEAD["OpportunityLead / HiringSignal"]
+  WAG["WhatsApp Groups · opt-in"] --> DET["Cheap hiring detector"]
+  DET --> LEAD
+  LEAD --> HUMAN["Revisão / promoção humana"]
+  HUMAN --> NORM
+  RADAR["Company Radar"] --> ATS["ATS providers / career pages"]
+  ATS --> SRC
+  SRC --> NORM["Normalizer + Canonicalizer + Dedup + Lifecycle"]
+  NORM --> CHEAP["Cheap filters"]
+  CHEAP --> MATCH["Technical Matcher"]
+  MATCH --> PRIORITY["Opportunity Priority"]
+  PRIORITY --> READ
+  PRIORITY --> AUTO["Autopilot Policy"]
+  AUTO --> RESUME["Resume + EvidenceGuard"]
+  RESUME --> REVIEW["Revisão humana"]
+  REVIEW --> READ
+  AUTO --> OUT["SQLite Outbox"]
+  OUT --> N8N["n8n"]
+  N8N --> EVO["Evolution API"]
+  EVO --> WA["WhatsApp"]
+  UI --> CONN["WhatsApp Connection Center"]
+  CONN -. "instance / QR / state / teste explícito" .-> EVO
+  NORM --> DB[("SQLite local")]
+  DIAG["Runtime capability diagnostics"] -.-> SRC
+  DIAG -.-> WEB
+  DIAG -.-> EVO
+  AUTO --> DB

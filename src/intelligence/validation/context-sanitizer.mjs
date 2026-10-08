@@ -1,0 +1,5 @@
+const forbiddenKey=/^(email|phone|telephone|address|street|postal|zip|password|token|cookie|authorization|document|resumeFile|fileData)$/i;
+const sensitiveKey=/disability|veteran|ethnicity|gender|medical|health|race|sexual|demographic/i;
+function redactText(value){return String(value).replace(/[\w.+-]+@[\w.-]+\.[a-z]{2,}/gi,"[redacted-email]").replace(/\+?\d[\d\s().-]{7,}\d/g,"[redacted-phone]");}
+const identifierKey=/^(?:id|.*Ids)$/;
+export function sanitizeIntelligenceContext(input,{allowKeys=[]}={}){const allowed=new Set(allowKeys);function visit(value,key=""){if(forbiddenKey.test(key)&&!allowed.has(key))return undefined;if(sensitiveKey.test(key))return undefined;if(Array.isArray(value))return value.slice(0,100).map(item=>visit(item,key)).filter(item=>item!==undefined);if(value&&typeof value==="object"){const output={};for(const [childKey,child] of Object.entries(value)){const clean=visit(child,childKey);if(clean!==undefined)output[childKey]=clean;}return output;}if(typeof value==="string")return identifierKey.test(key)?String(value):redactText(value);return value;}return visit(input)||{};}

@@ -1,0 +1,346 @@
+.opportunity-workspace .workspace-header {
+  padding-bottom: var(--space-6);
+}
+
+.opportunity-workspace .workspace-title {
+  align-items: flex-end;
+  margin-top: var(--space-5);
+}
+
+.opportunity-workspace .workspace-title .eyebrow {
+  margin-bottom: var(--space-2);
+}
+
+.opportunity-workspace-flow {
+  display: grid;
+  gap: var(--space-6);
+  max-width: 1280px;
+}
+
+.opportunity-decision-hero {
+  align-items: stretch;
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--action);
+  border-radius: var(--radius-md);
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(280px, 0.6fr);
+  overflow: hidden;
+}
+
+.opportunity-decision-hero .rail-panel {
+  border: 0;
+  box-shadow: none;
+  height: 100%;
+  margin: 0;
+}
+
+.opportunity-decision-actions {
+  align-content: center;
+  background: var(--surface-soft);
+  border-left: 1px solid var(--line);
+  display: grid;
+  gap: var(--space-4);
+  padding: var(--space-6);
+}
+
+.opportunity-decision-actions > p {
+  color: var(--text-soft);
+  margin: 0;
+}
+
+.opportunity-decision-actions > div > p {
+  color: var(--text-soft);
+  margin: var(--space-1) 0 0;
+}
+
+.opportunity-decision-buttons {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.opportunity-decision-buttons .button {
+  min-width: 0;
+  padding-inline: var(--space-3);
+}
+
+.decision-snapshot {
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0;
+}
+
+.decision-snapshot div {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.decision-snapshot dt {
+  color: var(--text-soft);
+  font-size: 12px;
+}
+
+.decision-snapshot dd {
+  font-size: 20px;
+  font-weight: 800;
+  margin: 0;
+}
+
+.opportunity-decision-summary .match-trust-summary {
+  margin: var(--space-5) 0;
+}
+
+.opportunity-facts {
+  border-top: 1px solid var(--line);
+  margin-top: var(--space-5);
+  padding-top: var(--space-5);
+}
+
+.workspace-rejection {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: var(--space-4);
+  padding-top: var(--space-4);
+}
+
+.workspace-rejection[hidden] {
+  display: none;
+}
+
+.workspace-rejection label {
+  display: grid;
+  font-weight: 700;
+  gap: var(--space-2);
+}
+
+.workspace-section {
+  scroll-margin-top: var(--space-6);
+}
+
+.workspace-jump-nav {
+  align-items: center;
+  background: color-mix(in srgb, var(--surface-raised) 94%, transparent);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  display: flex;
+  gap: var(--space-2);
+  overflow-x: auto;
+  padding: var(--space-2);
+  position: sticky;
+  top: var(--space-2);
+  z-index: 4;
+}
+
+.workspace-jump-nav a {
+  color: var(--text-soft);
+  font-size: 13px;
+  font-weight: 750;
+  padding: var(--space-2) var(--space-3);
+  white-space: nowrap;
+}
+
+.workspace-jump-nav a:hover,
+.workspace-jump-nav a:focus-visible {
+  background: var(--surface-soft);
+  color: var(--text);
+}
+
+.opportunity-overview-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
+  gap: var(--space-4);
+}
+
+.opportunity-overview-grid > .content-card {
+  margin: 0;
+  min-width: 0;
+}
+
+.opportunity-description-card {
+  align-self: stretch;
+}
+
+.workspace-collapsible {
+  background: transparent;
+  border: 0;
+  border-top: 1px solid var(--line-strong);
+  border-radius: 0;
+}
+
+.workspace-collapsible > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-5);
+  padding: var(--space-5);
+  cursor: default;
+  list-style: none;
+}
+
+.workspace-collapsible > summary::-webkit-details-marker {
+  display: none;
+}
+
+.workspace-collapsible > summary > span:first-child {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.workspace-collapsible > summary h2 {
+  font-size: 18px;
+  margin: 0;
+}
+
+.workspace-collapsible > summary small {
+  color: var(--text-soft);
+}
+
+.workspace-collapsible-action {
+  display: none;
+}
+
+.workspace-collapsible-action::before {
+  content: "Ver detalhes";
+  font-size: 13px;
+}
+
+.workspace-collapsible-body {
+  padding: 0 var(--space-5) var(--space-6);
+}
+
+.workspace-collapsible-body > .analysis-stack,
+.workspace-collapsible-body > .action-empty,
+.workspace-collapsible-body > .content-card,
+.workspace-collapsible-body > .resume-review {
+  margin-top: var(--space-4);
+}
+
+.workspace-section-heading {
+  margin-bottom: var(--space-4);
+  max-width: 720px;
+}
+
+.workspace-section-heading h2 {
+  margin: var(--space-1) 0 var(--space-2);
+}
+
+.workspace-section-heading p:last-child {
+  color: var(--text-soft);
+  margin: 0;
+}
+
+.opportunity-evidence-highlights {
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-bottom: var(--space-4);
+}
+
+.opportunity-evidence-highlights section {
+  padding: var(--space-5);
+}
+
+.opportunity-evidence-highlights section + section {
+  border-left: 1px solid var(--line);
+}
+
+.opportunity-evidence-highlights h3 {
+  margin: 0 0 var(--space-3);
+}
+
+.opportunity-evidence-highlights ul {
+  color: var(--text-soft);
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding-left: var(--space-5);
+}
+
+.workspace-section > .content-card + .content-card,
+.workspace-section > .analysis-stack,
+.workspace-section > .action-empty,
+.workspace-section > .resume-review {
+  margin-top: var(--space-4);
+}
+
+.workspace-advanced {
+  border-top: 1px solid var(--line-strong);
+  scroll-margin-top: var(--space-6);
+}
+
+.workspace-advanced > summary {
+  color: var(--text-soft);
+  cursor: pointer;
+  font-weight: 700;
+  padding: var(--space-5) 0;
+}
+
+.workspace-advanced > div {
+  display: grid;
+  gap: var(--space-4);
+  padding-bottom: var(--space-8);
+}
+
+.workspace-advanced .status-strip {
+  margin: 0;
+}
+
+@media (max-width: 820px) {
+  .opportunity-decision-hero {
+    grid-template-columns: 1fr;
+  }
+
+  .opportunity-decision-actions {
+    border-left: 0;
+    border-top: 1px solid var(--line);
+  }
+
+  .opportunity-evidence-highlights {
+    grid-template-columns: 1fr;
+  }
+
+  .opportunity-evidence-highlights section + section {
+    border-left: 0;
+    border-top: 1px solid var(--line);
+  }
+
+  .opportunity-overview-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .opportunity-decision-buttons {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 560px) {
+  .opportunity-workspace-flow {
+    gap: var(--space-6);
+  }
+
+  .opportunity-workspace .workspace-title {
+    align-items: stretch;
+  }
+
+  .opportunity-decision-actions,
+  .opportunity-decision-hero .rail-panel {
+    padding: var(--space-4);
+  }
+
+  .decision-snapshot {
+    grid-template-columns: 1fr;
+  }
+
+  .workspace-collapsible > summary {
+    align-items: flex-start;
+    padding: var(--space-4) 0;
+  }
+
+  .workspace-collapsible-body {
+    padding: 0 0 var(--space-5);
+  }
+}

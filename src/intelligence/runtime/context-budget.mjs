@@ -1,0 +1,6 @@
+import { sanitizeIntelligenceContext } from "../validation/context-sanitizer.mjs";
+export class ContextBudget{
+  constructor({maxCharacters=12000}={}){this.maxCharacters=Math.max(2000,Number(maxCharacters));}
+  prepare(input,options={}){const sanitized=sanitizeIntelligenceContext(input,options);const text=JSON.stringify(sanitized);if(text.length<=this.maxCharacters)return {context:sanitized,truncated:false,originalCharacters:text.length,usedCharacters:text.length,warnings:[]};const compact={};let used=2;for(const [key,value] of Object.entries(sanitized)){const serialized=JSON.stringify(value);const remaining=this.maxCharacters-used-key.length-6;if(remaining<=0)break;if(serialized.length<=remaining){compact[key]=value;used+=serialized.length+key.length+4;}else if(typeof value==="string"){compact[key]=value.slice(0,Math.max(0,remaining-20));used=this.maxCharacters;break;}else if(Array.isArray(value)){compact[key]=[];for(const item of value){const candidate=JSON.stringify([...compact[key],item]);if(candidate.length>remaining)break;compact[key].push(item);}used+=JSON.stringify(compact[key]).length+key.length+4;}}
+    return {context:compact,truncated:true,originalCharacters:text.length,usedCharacters:JSON.stringify(compact).length,warnings:["CONTEXT_TRUNCATED"]};}
+}

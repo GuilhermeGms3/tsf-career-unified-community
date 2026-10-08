@@ -1,0 +1,7 @@
+export const DEFAULT_RESUME_DOCUMENT_POLICIES=Object.freeze({requireResumeReview:true,requireEvidenceValidation:true,defaultApplicationTemplate:"BASE_01",defaultGeneralTemplate:"BASE_01",minimumResumeParseability:65,maximumResumePages:2,requireContact:true,requireExperience:true,requireEducationWhenAvailable:true,rejectEmptyDocument:true,allowAutomaticRenderAfterApproval:true,allowExternalExport:false,allowN8nDocumentEvents:false});
+
+export class TemplatePolicy{
+  constructor(policy={}){this.policy={...DEFAULT_RESUME_DOCUMENT_POLICIES,...policy};}
+  select({purpose="APPLICATION",requestedTemplateId="",language="pt-BR"}={}){const id=requestedTemplateId||(purpose==="APPLICATION"?this.policy.defaultApplicationTemplate:this.policy.defaultGeneralTemplate);return {templateId:id,language:["pt-BR","en"].includes(language)?language:"pt-BR"};}
+  regression({before={},after={},matchBefore=null,matchAfter=null,essentialBefore=true,essentialAfter=true}={}){const reasons=[];if(Number(after.score||0)<this.policy.minimumResumeParseability)reasons.push("PARSEABILITY_BELOW_MINIMUM");if(Number(after.score||0)<Number(before.score||0))reasons.push("PARSEABILITY_REGRESSION");if(Number.isFinite(Number(matchBefore))&&Number.isFinite(Number(matchAfter))&&Number(matchAfter)<Number(matchBefore))reasons.push("ATS_MATCH_REGRESSION");if(essentialBefore&&!essentialAfter)reasons.push("ESSENTIAL_CONTENT_REGRESSION");return {allowed:reasons.length===0,reasons,status:reasons.length?"REVIEW_REQUIRED":"PASS"};}
+}

@@ -1,0 +1,7 @@
+.paged-out {
+  display: none !important;
+}
+
+.load-more {
+  margin: 16px auto 0;
+}

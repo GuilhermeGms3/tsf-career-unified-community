@@ -1,0 +1,3 @@
+import { openIntelligenceRuntime } from "./intelligence-runtime.mjs";
+import { BenchmarkService } from "../src/intelligence/runtime/benchmark-service.mjs";
+const runtime=await openIntelligenceRuntime();try{const status=await runtime.service.status();const models=status.models.filter(item=>item.installed).map(item=>item.modelName);if(!models.length){console.error("Nenhum modelo Ollama instalado/configurado. Nenhum download foi iniciado.");process.exitCode=2;}else{const results=await new BenchmarkService({provider:runtime.provider,repository:runtime.store.intelligenceBenchmarks,hardwareProfile:status.hardware}).run(models);console.log(JSON.stringify({hardwareProfile:status.hardware.memoryProfile,sequential:true,results},null,2));}}finally{runtime.store.close();}

@@ -1,0 +1,37 @@
+{
+  "name": "Career Unified - WhatsApp Alerts",
+  "nodes": [
+    {
+      "parameters": {"httpMethod":"POST","path":"career-whatsapp-alerts","responseMode":"responseNode","options":{}},
+      "id":"career-webhook","name":"Career Webhook","type":"n8n-nodes-base.webhook","typeVersion":2,"position":[0,0],
+      "webhookId":"career-whatsapp-alerts"
+    },
+    {
+      "parameters": {"jsCode":"const crypto = require('crypto');\nconst input = $input.first().json;\nconst headers = Object.fromEntries(Object.entries(input.headers || {}).map(([key,value]) => [key.toLowerCase(), String(value)]));\nconst body = input.body || {};\nconst eventId = headers['x-career-event-id'];\nconst timestamp = headers['x-career-timestamp'];\nconst provided = String(headers['x-career-signature'] || '').replace(/^sha256=/, '');\nconst secret = process.env.CAREER_N8N_WEBHOOK_SECRET;\nif (!secret || !eventId || !timestamp || !provided) throw new Error('CAREER_AUTH_MISSING');\nif (eventId !== body.eventId || timestamp !== body.timestamp) throw new Error('CAREER_EVENT_MISMATCH');\nconst eventTime = Date.parse(timestamp);\nif (!Number.isFinite(eventTime) || Math.abs(Date.now() - eventTime) > 300000) throw new Error('CAREER_TIMESTAMP_EXPIRED');\nconst allowed = ['JOB_HIGH_MATCH','JOB_MATCH_DIGEST_READY','INTEGRATION_TEST'];\nif (!allowed.includes(body.type)) throw new Error('CAREER_EVENT_NOT_ALLOWED');\nconst expected = crypto.createHmac('sha256', secret).update(`${timestamp}.${JSON.stringify(body)}`).digest('hex');\nconst a = Buffer.from(expected, 'hex'); const b = Buffer.from(provided, 'hex');\nif (a.length !== b.length || !crypto.timingSafeEqual(a,b)) throw new Error('CAREER_SIGNATURE_INVALID');\nconst state = $getWorkflowStaticData('global'); state.seen ||= {};\nfor (const [id,seenAt] of Object.entries(state.seen)) if (Date.now() - seenAt > 600000) delete state.seen[id];\nif (state.seen[eventId]) throw new Error('CAREER_REPLAY_BLOCKED'); state.seen[eventId] = Date.now();\nreturn [{json: body}];"},
+      "id":"verify","name":"Verify HMAC and Replay","type":"n8n-nodes-base.code","typeVersion":2,"position":[240,0]
+    },
+    {
+      "parameters": {"jsCode":"const event = $input.first().json; const d = event.data || {};\nconst clean = value => String(value || '').replace(/[\\r\\n]+/g, ' ').slice(0, 500);\nlet message;\nif (event.type === 'JOB_HIGH_MATCH') message = `🎯 *Vaga com alto match*\\n${clean(d.title)} — ${clean(d.company)}\\nMatch: ${Number(d.fitScore || 0)}% | ${clean(d.eligibility)}\\n${clean(d.location)}\\n${clean(d.applicationUrl)}${d.tailoringRunId ? `\\nTailoring preparado: REVIEW_REQUIRED (${clean(d.tailoringRunId)})` : d.resumeVersionId ? `\\nCurrículo preparado: REVIEW_REQUIRED (${clean(d.resumeVersionId)})` : ''}`;\nelse if (event.type === 'JOB_MATCH_DIGEST_READY') message = `📌 *Resumo Career Unified*\\n${Number(d.matchCount || 0)} novas vagas elegíveis. Melhor match: ${Number(d.topScore || 0)}%.\\nAbra o Hub para revisar; nenhuma candidatura foi enviada.`;\nelse message = `✅ *Teste Career Unified*\\n${clean(d.message || 'Integração ativa.')}\\nNenhuma candidatura foi enviada.`;\nreturn [{json:{eventId:event.eventId,message}}];"},
+      "id":"format","name":"Format Safe Message","type":"n8n-nodes-base.code","typeVersion":2,"position":[480,0]
+    },
+    {
+      "parameters": {"method":"POST","url":"={{ 'http://evolution-api:8080/message/sendText/' + $env.EVOLUTION_INSTANCE_NAME }}","sendHeaders":true,"headerParameters":{"parameters":[{"name":"apikey","value":"={{ $env.EVOLUTION_API_KEY }}"}]},"sendBody":true,"contentType":"raw","rawContentType":"application/json","body":"={{ JSON.stringify({ number: $env.CAREER_WHATSAPP_TARGET, text: $json.message }) }}","options":{"timeout":10000}},
+      "id":"evolution","name":"Send via Evolution","type":"n8n-nodes-base.httpRequest","typeVersion":4.2,"position":[720,0]
+    },
+    {
+      "parameters": {"respondWith":"json","responseBody":"={{ { ok: true, eventId: $('Format Safe Message').item.json.eventId } }}","options":{}},
+      "id":"response","name":"Acknowledge","type":"n8n-nodes-base.respondToWebhook","typeVersion":1.4,"position":[960,0]
+    }
+  ],
+  "connections": {
+    "Career Webhook":{"main":[[{"node":"Verify HMAC and Replay","type":"main","index":0}]]},
+    "Verify HMAC and Replay":{"main":[[{"node":"Format Safe Message","type":"main","index":0}]]},
+    "Format Safe Message":{"main":[[{"node":"Send via Evolution","type":"main","index":0}]]},
+    "Send via Evolution":{"main":[[{"node":"Acknowledge","type":"main","index":0}]]}
+  },
+  "active": false,
+  "settings":{"executionOrder":"v1","saveManualExecutions":true,"saveExecutionProgress":true,"saveDataErrorExecution":"all","saveDataSuccessExecution":"none"},
+  "versionId":"10e29652-dcac-47d9-a923-9b22a7b6eeb1",
+  "meta":{"templateCredsSetupCompleted":false},
+  "tags":[]
+}

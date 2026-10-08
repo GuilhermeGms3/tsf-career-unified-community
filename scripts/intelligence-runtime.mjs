@@ -1,0 +1,4 @@
+import path from "node:path";
+import { UnifiedStateStore } from "../server/unified-state-store.mjs";
+import { createIntelligenceProvider, IntelligenceService } from "../src/intelligence/intelligence-service.mjs";
+export async function openIntelligenceRuntime(){const dataDir=path.resolve(process.env.HUB_DATA_DIR||path.join(import.meta.dirname,"..","data"));const store=await new UnifiedStateStore({dataDir}).initialize();let settings=store.intelligenceSettings.get();if(!settings)settings=store.intelligenceSettings.save({provider:"ollama",endpoint:process.env.OLLAMA_URL||"http://localhost:11434"});const provider=createIntelligenceProvider(settings);const service=new IntelligenceService({settings,provider,repositories:{runs:store.intelligenceRuns,cache:store.intelligenceCache,benchmarks:store.intelligenceBenchmarks}});return {store,settings,provider,service};}

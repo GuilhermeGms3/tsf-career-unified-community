@@ -1,0 +1,3 @@
+import {spawnSync} from "node:child_process";
+const files=["tests/community-classifier-v4-1.test.mjs","tests/provider-routing-v4-1.test.mjs","tests/mass-hunt-funnel-v4-1.test.mjs","tests/matcher-semantics-v4-1.test.mjs","tests/analysis-without-resume-v4-1.test.mjs","tests/cross-source-reconciliation-v4-1.test.mjs","tests/runtime-privacy-v4-1.test.mjs","tests/privacy-webhook-v4-1.test.mjs","tests/search-composer-v4-1.test.mjs"];
+const result=spawnSync(process.execPath,["--test","--test-concurrency=1",...files],{stdio:"inherit",cwd:process.cwd()});if(result.status!==0)process.exit(result.status||1);console.log("Discovery V4.1 validation: OK");

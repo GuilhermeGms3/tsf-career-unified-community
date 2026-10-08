@@ -1,0 +1,28 @@
+import assert from "node:assert/strict";
+import path from "node:path";
+import {pathToFileURL} from "node:url";
+import test,{after,before} from "node:test";
+import {chromium} from "playwright";
+import {AtsDetector} from "../src/automation/ats/ats-detector.mjs";
+import {GupyAdapter} from "../src/automation/ats/gupy/gupy-adapter.mjs";
+import {parseGupyIdentity} from "../src/automation/ats/gupy/gupy-identity.mjs";
+import {CandidateKnowledgeBase} from "../src/application/candidate-knowledge-base.mjs";
+import {detectChallenge} from "../src/automation/application-engine.mjs";
+
+const fixtures=path.resolve(import.meta.dirname,"fixtures","ats");let browser;const open=async name=>{const page=await browser.newPage();await page.goto(pathToFileURL(path.join(fixtures,name)).href);return page;};before(async()=>browser=await chromium.launch({headless:true}));after(async()=>browser.close());
+const knowledge=CandidateKnowledgeBase.fromProfile({personal:{fullName:"Ana Silva",email:"ana@example.test",country:"Brasil"},career:{workAuthorized:true}});
+test("Gupy V1: stable company and opportunity identity",()=>assert.deepEqual(parseGupyIdentity("https://acme.gupy.io/candidates/jobs/123/apply"),{companyKey:"acme",providerJobId:"123",canonicalUrl:"https://acme.gupy.io/jobs/123",applicationUrl:"https://acme.gupy.io/candidates/jobs/123/apply"}));
+test("Gupy V1: detect",async()=>{const p=await open("gupy-simple.html");assert.equal((await new AtsDetector().detect(p)).type,"gupy");await p.close();});
+test("Gupy V1: inspect simple form and submission boundary",async()=>{const p=await open("gupy-simple.html"),x=await new GupyAdapter().inspectApplicationForm(p);assert.equal(x.fields.length,2);assert.equal(x.schema.submissionBoundary,true);await p.close();});
+test("Gupy V1: fill and validate never clicks submit",async()=>{const p=await open("gupy-simple.html"),a=new GupyAdapter(),mapped=a.mapFields(await a.inspectApplicationForm(p),knowledge);await a.fill(p,mapped);assert.equal((await a.validate(p,mapped)).valid,true);assert.equal(await p.evaluate(()=>window.submitCount),0);await p.close();});
+test("Gupy V1: multi-step is explicit",async()=>{const p=await open("gupy-multi-step.html"),x=await new GupyAdapter().inspectApplicationForm(p);assert.equal(x.schema.multiStep,true);await p.close();});
+test("Gupy V1: login is a human handoff",async()=>{const p=await open("gupy-login-required.html"),x=await new GupyAdapter().inspectApplicationForm(p);assert.equal(x.schema.loginRequired,true);assert.equal(await detectChallenge(p),"LOGIN_REQUIRED");await p.close();});
+test("Gupy V1: pinned resume upload field is detected",async()=>{const p=await open("gupy-resume-upload.html"),x=await new GupyAdapter().inspectApplicationForm(p);assert.equal(x.fields.some(field=>field.type==="file"&&field.required),true);await p.close();});
+test("Gupy V1: required custom text remains USER_REQUIRED",async()=>{const p=await open("gupy-required-text.html"),a=new GupyAdapter(),mapped=a.mapFields(await a.inspectApplicationForm(p),knowledge);assert.equal(mapped.some(field=>field.answerStatus==="USER_REQUIRED"),true);await p.close();});
+test("Gupy V1: select and radio are supported components",async()=>{const p=await open("gupy-select-radio.html"),x=await new GupyAdapter().inspectApplicationForm(p);assert.equal(x.fields.some(field=>field.type==="select-one"),true);assert.equal(x.fields.some(field=>field.type==="radio-group"),true);await p.close();});
+test("Gupy V1: unknown and knockout questions are not answered optimistically",async()=>{for(const file of ["gupy-unknown-question.html","gupy-knockout.html"]){const p=await open(file),a=new GupyAdapter(),mapped=a.mapFields(await a.inspectApplicationForm(p),knowledge);assert.equal(mapped.some(field=>field.required&&field.answerStatus==="USER_REQUIRED"),true);await p.close();}});
+test("Gupy V1: sensitive question requires user",async()=>{const p=await open("gupy-sensitive.html"),a=new GupyAdapter(),mapped=a.mapFields(await a.inspectApplicationForm(p),knowledge);assert.equal(mapped.some(field=>field.sensitive&&field.answerStatus==="USER_REQUIRED"),true);await p.close();});
+test("Gupy V1: CAPTCHA stops without bypass",async()=>{const p=await open("gupy-captcha.html");assert.equal(await detectChallenge(p),"CAPTCHA_REQUIRED");await p.close();});
+test("Gupy V1: DOM changed degrades instead of guessing",async()=>{const p=await open("gupy-dom-changed.html"),x=await new GupyAdapter().inspectApplicationForm(p);assert.equal(x.schema.health,"UNSUPPORTED");await p.close();});
+test("Gupy V1: confirmation fixture exposes receipt evidence",async()=>{const p=await open("gupy-confirmation.html");assert.equal(await p.getByText("Candidatura enviada!",{exact:true}).isVisible(),true);assert.match(await p.locator("a").getAttribute("href"),/applications\/fixture-123/);await p.close();});
+test("Gupy V1: real submit method remains prohibited",async()=>await assert.rejects(new GupyAdapter().submit(),error=>error.code==="GUPY_SUBMIT_NOT_HOMOLOGATED"));

@@ -1,0 +1,5 @@
+import { TASK_TYPES } from "../runtime/task-types.mjs";
+export class SemanticRequirementEnhancer{
+  constructor(service){this.service=service;}
+  async enhance(requirements,{deterministicConfidence=1}={}){if(deterministicConfidence>=this.service.policies.minimumDeterministicConfidenceBeforeLlm)return {requirements,enhanced:false,source:"DETERMINISTIC"};const response=await this.service.execute(TASK_TYPES.JOB_REQUIREMENT_ENHANCEMENT,{requirements:requirements.map(({id,originalText,type,importance,normalizedName})=>({id,originalText,type,importance,normalizedName}))},{fallback:{enhancements:[]}});const byOriginal=new Map((response.result.enhancements||[]).filter(x=>x.confidence>=0.75).map(x=>[x.originalText,x]));return {requirements:requirements.map(item=>{const enhanced=byOriginal.get(item.originalText);return enhanced?{...item,normalizedName:enhanced.normalizedName||item.normalizedName,importance:enhanced.importance==="unknown"?item.importance:enhanced.importance,semanticConfidence:enhanced.confidence,source:"LLM_ENHANCED"}:item;}),enhanced:byOriginal.size>0,meta:response.meta};}
+}

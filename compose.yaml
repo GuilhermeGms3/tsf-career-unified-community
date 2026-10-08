@@ -1,0 +1,178 @@
+name: career-unified-community
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: career-unified-community:local
+    ports:
+      - "127.0.0.1:7123:7123"
+    environment:
+      HUB_HOST: 0.0.0.0
+      HUB_PORT: 7123
+      HUB_DATA_DIR: /app/data
+      OLLAMA_URL: http://host.docker.internal:11434
+      CAREER_ENGINE_URL: http://career-engine:7130
+      LEGACY_ROOT: /legacy
+      AUTOMATION_HEADLESS: "true"
+      NODE_ENV: ${NODE_ENV:-production}
+      CAREER_DEFAULT_COUNTRY: ${CAREER_DEFAULT_COUNTRY:-Portugal}
+      CAREER_SUBMISSION_ENABLED: ${CAREER_SUBMISSION_ENABLED:-false}
+      LIVE_INSPECT: "false"
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      GITHUB_OAUTH_CLIENT_ID: ${GITHUB_OAUTH_CLIENT_ID:-}
+      LOG_RETENTION_DAYS: ${LOG_RETENTION_DAYS:-30}
+      LOG_MAX_ROWS: ${LOG_MAX_ROWS:-5000}
+      N8N_INTERNAL_URL: http://n8n:5678
+      CAREER_N8N_WEBHOOK_SECRET: ${CAREER_N8N_WEBHOOK_SECRET:-}
+      BRAVE_SEARCH_API_KEY: ${BRAVE_SEARCH_API_KEY:-}
+      CAREER_CREDENTIAL_KEY_PATH: /run/career-unified-secrets/source-credentials.key
+      EVOLUTION_INTERNAL_URL: http://evolution-api:8080
+      EVOLUTION_MANAGER_URL: ${EVOLUTION_MANAGER_URL:-http://127.0.0.1:8081/manager}
+      EVOLUTION_API_KEY: ${EVOLUTION_API_KEY:-}
+      EVOLUTION_INSTANCE_NAME: ${EVOLUTION_INSTANCE_NAME:-}
+      CAREER_EVOLUTION_WEBHOOK_SECRET: ${CAREER_EVOLUTION_WEBHOOK_SECRET:-}
+      CAREER_WHATSAPP_TARGET: ${CAREER_WHATSAPP_TARGET:-}
+      CAREER_WHATSAPP_APPROVER: ${CAREER_WHATSAPP_APPROVER:-}
+      TZ: ${TZ:-Europe/Lisbon}
+    volumes:
+      - ./data:/app/data
+      - source_credential_keys:/run/career-unified-secrets
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    stop_grace_period: 45s
+    depends_on:
+      career-engine:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:7123/api/projects').then(r=>{if(!r.ok)process.exit(1)})"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+
+  career-engine:
+    build:
+      context: ./engine
+      dockerfile: Dockerfile
+    image: career-unified-community-engine:local
+    environment:
+      CAREER_DEFAULT_COUNTRY: ${CAREER_DEFAULT_COUNTRY:-Portugal}
+    expose:
+      - "7130"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:7130/health')"]
+      interval: 20s
+      timeout: 8s
+      retries: 8
+      start_period: 30s
+
+  n8n:
+    profiles: ["automation"]
+    image: docker.n8n.io/n8nio/n8n:2.34.6
+    ports:
+      - "127.0.0.1:5678:5678"
+    environment:
+      N8N_HOST: n8n
+      N8N_PORT: 5678
+      N8N_PROTOCOL: http
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:-}
+      N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS: "true"
+      N8N_SECURE_COOKIE: "false"
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
+      NODE_FUNCTION_ALLOW_BUILTIN: crypto
+      GENERIC_TIMEZONE: ${TZ:-Europe/Lisbon}
+      TZ: ${TZ:-Europe/Lisbon}
+      CAREER_N8N_WEBHOOK_SECRET: ${CAREER_N8N_WEBHOOK_SECRET:-}
+      EVOLUTION_API_KEY: ${EVOLUTION_API_KEY:-}
+      EVOLUTION_INSTANCE_NAME: ${EVOLUTION_INSTANCE_NAME:-}
+      CAREER_WHATSAPP_TARGET: ${CAREER_WHATSAPP_TARGET:-}
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./automation/n8n/workflows:/opt/career-workflows:ro
+    depends_on:
+      evolution-api:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5678/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 20s
+      timeout: 5s
+      retries: 10
+
+  evolution-api:
+    profiles: ["automation"]
+    image: evoapicloud/evolution-api:v2.3.7
+    ports:
+      - "127.0.0.1:${EVOLUTION_HOST_PORT:-8081}:8080"
+    environment:
+      SERVER_URL: http://localhost:8080
+      LOG_LEVEL: ${EVOLUTION_LOG_LEVEL:-ERROR}
+      LOG_BAILEYS: ${EVOLUTION_LOG_BAILEYS:-error}
+      AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY:-}
+      DATABASE_ENABLED: "true"
+      DATABASE_PROVIDER: postgresql
+      DATABASE_CONNECTION_URI: postgresql://${EVOLUTION_POSTGRES_USER:-evolution}:${EVOLUTION_POSTGRES_PASSWORD:-}@evolution-postgres:5432/${EVOLUTION_POSTGRES_DB:-evolution}
+      DATABASE_SAVE_DATA_INSTANCE: "true"
+      DATABASE_SAVE_DATA_NEW_MESSAGE: "true"
+      DATABASE_SAVE_MESSAGE_UPDATE: "true"
+      CACHE_REDIS_ENABLED: "true"
+      CACHE_REDIS_URI: redis://evolution-redis:6379/6
+      CACHE_REDIS_PREFIX_KEY: evolution
+      CACHE_LOCAL_ENABLED: "false"
+      DEL_INSTANCE: "false"
+      LANGUAGE: pt-BR
+    volumes:
+      - evolution_instances:/evolution/instances
+    logging:
+      driver: "none"
+    depends_on:
+      evolution-postgres:
+        condition: service_healthy
+      evolution-redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/ >/dev/null 2>&1 || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  evolution-postgres:
+    profiles: ["automation"]
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: ${EVOLUTION_POSTGRES_USER:-evolution}
+      POSTGRES_PASSWORD: ${EVOLUTION_POSTGRES_PASSWORD:-}
+      POSTGRES_DB: ${EVOLUTION_POSTGRES_DB:-evolution}
+    volumes:
+      - evolution_postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${EVOLUTION_POSTGRES_USER:-evolution} -d ${EVOLUTION_POSTGRES_DB:-evolution}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  evolution-redis:
+    profiles: ["automation"]
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - evolution_redis_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  source_credential_keys:
+  n8n_data:
+  evolution_instances:
+  evolution_postgres_data:
+  evolution_redis_data:

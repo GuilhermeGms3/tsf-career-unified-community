@@ -1,0 +1,6 @@
+import { evaluateResumeParseability } from "../../matching/resume-parseability.mjs";
+
+export class AtsDocumentValidator{
+  constructor({matcher=null}={}){this.matcher=matcher;}
+  evaluate({text,spec,job=null,profile={},before={}}={}){const sections={summary:spec?.summary?.text||"",experience:(spec?.experiences||[]).map(x=>[x.title,x.company,...(x.bullets||[]).map(b=>b.text||b)].filter(Boolean).join(" ")).join("\n"),education:(spec?.education||[]).map(x=>[x.institution,x.degree,x.field].filter(Boolean).join(" ")).join("\n"),skills:(spec?.skills||[]).map(x=>x.name||x).join(", "),projects:(spec?.projects||[]).map(x=>[x.name,x.description].filter(Boolean).join(" ")).join("\n"),certifications:(spec?.certifications||[]).map(x=>x.name||x).join(", "),languages:(spec?.languages||[]).map(x=>`${x.name||x} ${x.level||""}`).join(", ")};const resume={text:String(text||""),sections,extraction:{method:"pdf-text"}},parseability=evaluateResumeParseability(resume);let match=null;if(this.matcher&&job)match=this.matcher({job,profile,resume});const beforeScore=Number(before.overallScore??before.score??0),afterScore=Number(match?.overallScore??match?.score??0);return {parseability,match,comparison:{beforeScore,afterScore,delta:afterScore-beforeScore}};}
+}

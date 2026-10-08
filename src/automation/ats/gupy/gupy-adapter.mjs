@@ -1,0 +1,10 @@
+import {GenericAdapter} from "../generic/generic-adapter.mjs";
+import {buildDomSignature} from "../greenhouse/dom-signature.mjs";
+import {assessAdapterHealth} from "../greenhouse/adapter-health.mjs";
+import {parseGupyIdentity} from "./gupy-identity.mjs";
+
+export class GupyAdapter extends GenericAdapter{
+  static type="gupy";static version="gupy-adapter-v1";
+  async inspectApplicationForm(page){const identity=parseGupyIdentity(page.url()),loginRequired=await page.locator("input[type=password], a[href*='login'], button:has-text('Entrar')").count()>0;let inspected;try{inspected=await super.inspectApplicationForm(page);}catch(error){if(error.code!=="FORM_NOT_FOUND")throw error;inspected={fields:[],submitVisible:false};}const unsupportedSignals=[];if(loginRequired)unsupportedSignals.push("LOGIN_REQUIRED");if(!inspected.fields.length)unsupportedSignals.push("NO_FORM_FIELDS");const unknownRequired=inspected.fields.filter(field=>field.required&&field.confidence<.7);unsupportedSignals.push(...unknownRequired.map(field=>`UNKNOWN_REQUIRED:${field.externalKey}`));const warnings=[...(loginRequired?[{code:"LOGIN_REQUIRED"}]:[]),...unknownRequired.map(field=>({code:"UNKNOWN_REQUIRED_QUESTION",field:field.label}))],health=assessAdapterHealth({fields:inspected.fields,warnings,unsupportedSignals:unsupportedSignals.filter(item=>item!=="LOGIN_REQUIRED")}),multiStep=await page.locator("[aria-current=step], [data-testid*='step'], .stepper, [role=progressbar]").count()>0,submissionBoundary=await page.getByRole("button",{name:/enviar candidatura|finalizar candidatura|concluir inscri[cç][aã]o|submit application/i}).count()>0;return {...inspected,schema:{ats:"gupy",variant:loginRequired?"login-required":multiStep?"multi-step":"application-form",fields:inspected.fields,warnings,unsupportedSignals,identity,loginRequired,multiStep,submissionBoundary,domSignature:buildDomSignature(inspected.fields,["gupy",identity.companyKey,identity.providerJobId]),...health}};}
+  async submit(){throw Object.assign(new Error("Gupy V1 para antes do botão final; submit externo não homologado."),{code:"GUPY_SUBMIT_NOT_HOMOLOGATED"});}
+}

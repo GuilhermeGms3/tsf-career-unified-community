@@ -1,0 +1,13 @@
+flowchart LR
+  D[DESCUBRIR<br/>Discovery Engine V3<br/>Search Intent · Mass Hunt · Company Radar] --> E[AVALIAR<br/>ATS Matcher V2<br/>Eligibility · Evidence · Priority]
+  E --> P[PREPARAR<br/>ResumeSelector · ArchetypeSelector<br/>ResumeTailor · EvidenceGuard · Tectonic]
+  P --> A[CANDIDATAR<br/>Application Planner<br/>Preflight · Fill Only · Human Review]
+  A --> T[ACOMPANHAR<br/>Application Events<br/>Attempts · Interviews · Follow-ups]
+  K[Candidate Knowledge] --> E
+  K --> P
+  K --> A
+  AU[Autopilot] --> D
+  N[Next Action Engine] -. orienta .-> E
+  N -. orienta .-> P
+  N -. orienta .-> A
+  N -. orienta .-> T

@@ -1,0 +1,4 @@
+import test from "node:test";import assert from "node:assert/strict";
+import {classifyThresholdScore,funnelFromFixture} from "../src/discovery/v4/mass-hunt-funnel.mjs";
+test("scores 50, 72 e 89 respeitam considerar 60 e prioridade 85",()=>{assert.deepEqual([50,72,89].map(score=>classifyThresholdScore(score,{consider:60,priority:85})),[{filtered:true,relevant:false,priority:false},{filtered:false,relevant:true,priority:false},{filtered:false,relevant:true,priority:true}]);});
+test("fixture do funil é derivada de eventos",()=>{const f=funnelFromFixture({raw:10,duplicates:4,relevant:3,priority:1});assert.deepEqual({raw:f.rawDiscoveries,duplicates:f.duplicates,canonical:f.canonicalOpportunities,relevant:f.relevantOpportunities,priority:f.priorityOpportunities,filtered:f.filteredOut},{raw:10,duplicates:4,canonical:6,relevant:3,priority:1,filtered:3});});

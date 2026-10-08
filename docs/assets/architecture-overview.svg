@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="760" viewBox="0 0 1400 760" role="img" aria-labelledby="title desc">
+  <title id="title">Arquitetura do Career Unified Experience V2</title>
+  <desc id="desc">Frontend modular, read models, engines de domínio, persistência e integrações assistidas.</desc>
+  <defs><style>.bg{fill:#f5f4ef}.box{fill:#fff;stroke:#d9dfdc;stroke-width:2}.dark{fill:#0d2026}.head{font:700 18px system-ui;fill:#182326}.copy{font:13px system-ui;fill:#5b696c}.light{font:700 17px system-ui;fill:#fff}.muted{font:12px system-ui;fill:#a7c0bc}.line{stroke:#16766c;stroke-width:3;fill:none}.dash{stroke:#9b730e;stroke-width:2;stroke-dasharray:7 5;fill:none}.label{font:800 12px system-ui;fill:#16766c;letter-spacing:1px}</style><marker id="a" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0 0v6l9-3z" fill="#16766c"/></marker></defs>
+  <rect class="bg" width="1400" height="760" rx="18"/>
+  <text class="label" x="55" y="55">EXPERIÊNCIA</text>
+  <g transform="translate(55 78)"><rect class="dark" width="1290" height="115" rx="15"/><text class="light" x="28" y="38">Experience V2 · ES Modules</text><text class="muted" x="28" y="65">Shell · Router · Navigation · Feature pages · Design tokens · Responsive states</text><text class="muted" x="28" y="89">Hoje · Oportunidades · Autopilot · Currículos · Candidaturas · Conhecimento · Configurações</text></g>
+  <path class="line" marker-end="url(#a)" d="M700 193v55"/>
+  <text class="label" x="55" y="250">COMPOSIÇÃO</text>
+  <g transform="translate(55 270)"><rect class="box" width="400" height="120" rx="14"/><text class="head" x="24" y="38">ExperienceService</text><text class="copy" x="24" y="66">Read models de oportunidade, currículo e candidatura</text><text class="copy" x="24" y="90">Sem persistência lateral ou regra duplicada</text></g>
+  <g transform="translate(500 270)"><rect class="box" width="400" height="120" rx="14"/><text class="head" x="24" y="38">Next Action Engine</text><text class="copy" x="24" y="66">Recomendação determinística por estado real</text><text class="copy" x="24" y="90">Não executa transição e não chama LLM</text></g>
+  <g transform="translate(945 270)"><rect class="box" width="400" height="120" rx="14"/><text class="head" x="24" y="38">Server Routes / BFF</text><text class="copy" x="24" y="66">Contratos existentes + workspaces de leitura</text><text class="copy" x="24" y="90">Fallback de deep links para o shell</text></g>
+  <path class="line" marker-end="url(#a)" d="M255 390v65M700 390v65M1145 390v65"/>
+  <text class="label" x="55" y="458">DOMÍNIO AUTORITATIVO</text>
+  <g transform="translate(55 480)"><rect class="box" width="240" height="135" rx="14"/><text class="head" x="20" y="36">Discovery V3</text><text class="copy" x="20" y="64">Search Intent · Mass Hunt</text><text class="copy" x="20" y="88">Company Radar · Lifecycle</text><text class="copy" x="20" y="112">Application Method</text></g>
+  <g transform="translate(315 480)"><rect class="box" width="240" height="135" rx="14"/><text class="head" x="20" y="36">Matching</text><text class="copy" x="20" y="64">Technical Match</text><text class="copy" x="20" y="88">Eligibility · Confidence</text><text class="copy" x="20" y="112">Opportunity Priority</text></g>
+  <g transform="translate(575 480)"><rect class="box" width="240" height="135" rx="14"/><text class="head" x="20" y="36">Resume Engine</text><text class="copy" x="20" y="64">Selector · Archetypes</text><text class="copy" x="20" y="88">Tailor · EvidenceGuard</text><text class="copy" x="20" y="112">Tectonic · Versions</text></g>
+  <g transform="translate(835 480)"><rect class="box" width="240" height="135" rx="14"/><text class="head" x="20" y="36">Application Engine</text><text class="copy" x="20" y="64">Planner · Preflight</text><text class="copy" x="20" y="88">Questions · Fill Only</text><text class="copy" x="20" y="112">Attempts · Events</text></g>
+  <g transform="translate(1095 480)"><rect class="box" width="250" height="135" rx="14"/><text class="head" x="20" y="36">Candidate Knowledge</text><text class="copy" x="20" y="64">Facts · Evidence</text><text class="copy" x="20" y="88">Reuse policy</text><text class="copy" x="20" y="112">Sensitive confirmation</text></g>
+  <path class="line" marker-end="url(#a)" d="M700 615v55"/>
+  <g transform="translate(55 675)"><rect class="dark" width="780" height="58" rx="13"/><text class="light" x="24" y="35">SQLite local · repositoríos · migrations · outbox</text></g>
+  <g transform="translate(870 675)"><rect class="box" width="475" height="58" rx="13"/><text class="head" x="20" y="35">n8n · Evolution · Ollama (opcionais)</text></g>
+  <path class="dash" d="M835 704h35"/>
+</svg>

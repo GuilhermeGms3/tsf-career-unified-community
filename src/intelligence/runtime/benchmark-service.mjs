@@ -1,0 +1,11 @@
+import { TASK_DEFINITIONS, taskPrompt } from "../prompts/task-definitions.mjs";
+import { parseStructuredOutput, validateStructuredOutput } from "../validation/structured-output-validator.mjs";
+const fixtures=[
+  {task:"QUESTION_CLASSIFICATION",input:{question:"Will you need immigration support to work here?",type:"radio",allowedSemanticKeys:["WORK_AUTHORIZATION.REQUIRES_SPONSORSHIP","CUSTOM.QUESTION"]},expected:value=>value.semanticKey==="WORK_AUTHORIZATION.REQUIRES_SPONSORSHIP"},
+  {task:"SEMANTIC_EVIDENCE_MATCH",input:{requirement:{originalText:"CI/CD experience"},evidence:[{id:"e1",text:"Created automated build, test and deployment pipelines using GitHub Actions."}]},expected:value=>value.status==="MATCH"&&value.evidenceIds?.includes("e1")}
+];
+export class BenchmarkService{
+  constructor({provider,repository,hardwareProfile}){this.provider=provider;this.repository=repository;this.hardware=hardwareProfile;}
+  async run(models,{timeoutMs=60000}={}){const output=[];for(const model of models){const started=Date.now();let validJson=0,validSchema=0,accurate=0,timeouts=0,loadNs=0,evalCount=0,evalNs=0;for(const fixture of fixtures){const def=TASK_DEFINITIONS[fixture.task];try{const result=await this.provider.generateStructured(taskPrompt(fixture.task,fixture.input),{task:fixture.task,model,schema:def.schema,timeoutMs,contextLimit:2048,keepAlive:"5m"});loadNs+=Number(result.metrics?.loadDurationNs||0);evalCount+=Number(result.metrics?.evalCount||0);evalNs+=Number(result.metrics?.evalDurationNs||0);const parsed=parseStructuredOutput(result.text);validJson++;validateStructuredOutput(parsed,def.schema);validSchema++;accurate+=Number(fixture.expected(parsed));}catch(error){timeouts+=Number(error.code==="PROVIDER_TIMEOUT");}}
+      const totalLatencyMs=Date.now()-started;const benchmark=this.repository.save({provider:this.provider.constructor.type,model,hardwareProfile:this.hardware.memoryProfile,loadLatencyMs:Math.round(loadNs/1e6),firstResponseLatencyMs:null,totalLatencyMs,throughput:evalNs?evalCount/(evalNs/1e9):null,jsonValidity:validJson/fixtures.length,schemaValidity:validSchema/fixtures.length,semanticAccuracy:accurate/fixtures.length,timeoutRate:timeouts/fixtures.length,runtime:{fixtureCount:fixtures.length}});output.push(benchmark);await this.provider.unload?.(model).catch(()=>{});}return output;}
+}

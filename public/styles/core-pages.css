@@ -1,0 +1,130 @@
+.page-secondary-navigation {
+  margin: var(--space-4) 0 var(--space-6);
+}
+
+.page-secondary-navigation > summary {
+  color: var(--text-soft);
+  cursor: pointer;
+  font-weight: 700;
+  width: fit-content;
+}
+
+.page-secondary-navigation nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  padding-top: var(--space-3);
+}
+
+.page-secondary-navigation a {
+  color: var(--action);
+  font-weight: 700;
+}
+
+.resumes-page .resume-summary {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.resume-dashboard {
+  display: grid;
+  gap: var(--space-8);
+  margin-top: var(--space-8);
+}
+
+.resume-dashboard > section,
+.resume-dashboard > details {
+  border-top: 1px solid var(--line);
+  padding-top: var(--space-6);
+}
+
+.resume-dashboard > section:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.archived-resumes > summary {
+  color: var(--text-soft);
+  cursor: pointer;
+  font-weight: 700;
+  margin-bottom: var(--space-4);
+}
+
+.resume-workspace-body {
+  display: grid;
+  gap: var(--space-6);
+  max-width: 1040px;
+}
+
+.resume-output-actions {
+  align-items: center;
+  border-top: 1px solid var(--line-strong);
+  display: flex;
+  gap: var(--space-6);
+  justify-content: space-between;
+  padding: var(--space-6) 0;
+}
+
+.resume-output-actions h2,
+.resume-output-actions p {
+  margin: 0;
+}
+
+.resume-output-actions h2 {
+  margin: var(--space-1) 0 var(--space-2);
+}
+
+.resume-output-actions p:last-child {
+  color: var(--text-soft);
+}
+
+.resume-output-actions .artifact-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.application-brief {
+  border-bottom: 1px solid var(--line);
+  border-top: 1px solid var(--line);
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-bottom: var(--space-5);
+}
+
+.application-brief > div {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-4) var(--space-5);
+}
+
+.application-brief > div + div {
+  border-left: 1px solid var(--line);
+}
+
+.application-brief strong {
+  font-size: 24px;
+}
+
+.application-brief span {
+  color: var(--text-soft);
+}
+
+@media (max-width: 720px) {
+  .resumes-page .resume-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .resume-output-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .application-brief {
+    grid-template-columns: 1fr;
+  }
+
+  .application-brief > div + div {
+    border-left: 0;
+    border-top: 1px solid var(--line);
+  }
+}

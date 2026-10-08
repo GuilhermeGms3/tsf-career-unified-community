@@ -1,0 +1,1 @@
+export function normalizeProviderHealth(value={}){const allowed=["HEALTHY","DEGRADED","OFFLINE","MISCONFIGURED"];const status=allowed.includes(value.status)?value.status:(value.ok?"HEALTHY":"OFFLINE");return {...value,status,ok:status==="HEALTHY"||status==="DEGRADED"};}

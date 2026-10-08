@@ -1,0 +1,2 @@
+import test from "node:test";import assert from "node:assert/strict";import {readFile} from "node:fs/promises";import {jobFamilyCatalog} from "../src/discovery/search-intent/job-family-catalog.mjs";
+test("Composer usa catálogo canônico e deixa JSON em detalhes técnicos",async()=>{const ui=await readFile("public/features/opportunities/page.js","utf8");assert.equal(jobFamilyCatalog.list().length,10);assert.match(ui,/capabilities\.jobFamilies/);assert.match(ui,/name="families"/);assert.doesNotMatch(ui,/name="roles" required/);assert.match(ui,/Ver detalhes técnicos/);});

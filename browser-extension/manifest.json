@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "Career Hub - Preenchimento Assistido",
+  "version": "1.0.0",
+  "description": "Preenche campos comuns usando o perfil local e nunca envia a candidatura.",
+  "permissions": [
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "http://localhost:7123/*",
+    "http://127.0.0.1:7123/*"
+  ],
+  "action": {
+    "default_title": "Preencher com Career Hub",
+    "default_popup": "popup.html"
+  }
+}
