@@ -13,6 +13,7 @@ export class AtsDetector {
     if(/(^|\.)smartrecruiters\.com$/i.test(hostname))return {type:"smartrecruiters",confidence:.9,signals:["smartrecruiters-hostname"],applicationSupport:"CONTROLLED_SUBMIT"};
     if(/(^|\.)workable\.com$/i.test(hostname))return {type:"workable",confidence:.9,signals:["workable-hostname"],applicationSupport:"CONTROLLED_SUBMIT"};
     if(/(^|\.)nerdin\.com\.br$/i.test(hostname))return {type:"nerdin",confidence:.95,signals:["nerdin-hostname"],applicationSupport:"CONTROLLED_SUBMIT"};
+    if(/(^|\.)(teamtailor\.com|careers-page\.com)$/i.test(hostname))return {type:"teamtailor",confidence:.9,signals:["teamtailor-hostname"],applicationSupport:"CONTROLLED_SUBMIT"};
     if(/myworkdayjobs\.com$|myworkdaysite\.com$/i.test(hostname))return {type:"workday",confidence:.9,signals:["workday-hostname"],applicationSupport:"ASSISTED_FILL"};
     const assisted=[
       {type:"indeed",host:/(^|\.)(indeed\.com|indeed\.com\.br)$/i,selector:"#indeedApplyButton, [data-testid='indeedApplyButton'], form[action*='indeed']"},
@@ -21,7 +22,6 @@ export class AtsDetector {
       {type:"oracle",host:/(^|\.)oraclecloud\.com$/i,selector:"[data-bind*='CandidateExperience'], [class*='candidate-experience'], form[action*='CandidateExperience']"},
       {type:"successfactors",host:/(^|\.)successfactors\.com$/i,selector:"form[action*='successfactors'], [id*='careerSite'], [class*='careerSite']"},
       {type:"personio",host:/(^|\.)(personio\.de|personio\.com)$/i,selector:"form[action*='personio'], [data-test-id='application-form'], [data-testid='application-form']"},
-      {type:"teamtailor",host:/(^|\.)(teamtailor\.com|careers-page\.com)$/i,selector:"form[action*='teamtailor'], [data-controller*='application'], [data-teamtailor]"},
     ];
     for(const candidate of assisted){
       const signals=[];

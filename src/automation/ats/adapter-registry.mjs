@@ -5,6 +5,7 @@ import {AshbyAdapter} from "./ashby/ashby-adapter.mjs";
 import {SmartRecruitersAdapter} from "./smartrecruiters/smartrecruiters-adapter.mjs";
 import {WorkableAdapter} from "./workable/workable-adapter.mjs";
 import {NerdinAdapter} from "./nerdin/nerdin-adapter.mjs";
+import {TeamtailorAdapter} from "./teamtailor/teamtailor-adapter.mjs";
 import { WorkdayAdapter } from "./workday/workday-adapter.mjs";
 import {GupyAdapter} from "./gupy/gupy-adapter.mjs";
 import {GUPY_CAPABILITY_TRUTH} from "../../application/gupy-capability-truth.mjs";
@@ -23,6 +24,7 @@ export const APPLICATION_ADAPTER_CAPABILITIES=Object.freeze({
   solides:assistedFillCapability,
   recrutei:assistedFillCapability,
   nerdin:Object.freeze({level:"CONTROLLED_SUBMIT",implemented:true,canInspect:true,canFill:true,canValidate:true,canSubmit:true,canReceipt:true,authHandoff:false,challengeHandoff:true,label:"Controlled Submit público em três etapas, sujeito a preflight fresh, consentimento e recibo observável"}),
+  teamtailor:Object.freeze({level:"CONTROLLED_SUBMIT",implemented:true,canInspect:true,canFill:true,canValidate:true,canSubmit:true,canReceipt:true,authHandoff:true,challengeHandoff:true,label:"Controlled Submit disponível em hosts Teamtailor oficiais quando o runtime e todos os gates estiverem habilitados"}),
   programathor:assistedFillCapability,
   remotar:assistedFillCapability,
   infojobs:assistedFillCapability,
@@ -38,14 +40,13 @@ export const APPLICATION_ADAPTER_CAPABILITIES=Object.freeze({
   oracle:assistedFillCapability,
   successfactors:assistedFillCapability,
   personio:assistedFillCapability,
-  teamtailor:assistedFillCapability,
   abler:assistedFillCapability,
   quickin:assistedFillCapability,
   pandape:assistedFillCapability
 });
 
 export class AdapterRegistry {
-  get(type){const normalized=String(type||"unknown").toLowerCase(),AssistedAdapter=assistedAtsAdapterTypes[normalized];return normalized==="greenhouse"?new GreenhouseAdapter():normalized==="lever"?new LeverAdapter():normalized==="ashby"?new AshbyAdapter():normalized==="smartrecruiters"?new SmartRecruitersAdapter():normalized==="workable"?new WorkableAdapter():normalized==="nerdin"?new NerdinAdapter():normalized==="workday"?new WorkdayAdapter():normalized==="gupy"?new GupyAdapter():AssistedAdapter?new AssistedAdapter():new GenericAdapter();}
+  get(type){const normalized=String(type||"unknown").toLowerCase(),AssistedAdapter=assistedAtsAdapterTypes[normalized];return normalized==="greenhouse"?new GreenhouseAdapter():normalized==="lever"?new LeverAdapter():normalized==="ashby"?new AshbyAdapter():normalized==="smartrecruiters"?new SmartRecruitersAdapter():normalized==="workable"?new WorkableAdapter():normalized==="nerdin"?new NerdinAdapter():normalized==="teamtailor"?new TeamtailorAdapter():normalized==="workday"?new WorkdayAdapter():normalized==="gupy"?new GupyAdapter():AssistedAdapter?new AssistedAdapter():new GenericAdapter();}
   supports(type){return Object.hasOwn(APPLICATION_ADAPTER_CAPABILITIES,String(type||"unknown").toLowerCase());}
   version(type){return this.get(type).constructor.version;}
   describe(type){const normalized=String(type||"unknown").toLowerCase();return structuredClone(APPLICATION_ADAPTER_CAPABILITIES[normalized]||APPLICATION_ADAPTER_CAPABILITIES.unknown);}

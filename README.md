@@ -7,8 +7,6 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-111827.svg)](LICENSE)
 [![Local first](https://img.shields.io/badge/data-local--first-0F766E)](#privacidade-e-seguranca)
 
-![Tela Hoje do TSF Career Unified](docs/frontend-recovery-screenshots/today-desktop.png)
-
 O TSF Career Unified organiza a jornada de busca de emprego em um único produto: descoberta multicanal, deduplicação, ranking explicável, fila diária, preparação de currículo, revisão pelo WhatsApp e candidatura assistida ou controlada. Esta edição pública nasce sem currículos, perfis, bancos de dados, tokens ou histórico pessoal.
 
 O padrão geográfico da edição Community é **Portugal**: Lisboa, Porto, Braga e remoto em Portugal. As superfícies de Brasília/DF e remoto no Brasil continuam disponíveis como opções.
@@ -24,6 +22,7 @@ O padrão geográfico da edição Community é **Portugal**: Lisboa, Porto, Brag
 - Integração opcional com modelos locais via Ollama ou API compatível com OpenAI.
 - Fluxos de revisão e confirmação via WhatsApp usando n8n e Evolution API.
 - AutoApply e Controlled Submit com gates, idempotência e recibos nos destinos suportados.
+- Cofres de sessão separados das fontes públicas para portais que exigem login, MFA, CAPTCHA ou confirmação por e-mail.
 - Fallback humano para login, MFA, CAPTCHA, perguntas desconhecidas e confirmação incerta.
 
 > AutoApply e AutoSubmit ficam desativados por padrão. Uma candidatura só deve ser tratada como confirmada quando houver evidência ou recibo positivo.
@@ -46,6 +45,22 @@ docker compose up -d --build
 Abra [http://127.0.0.1:7123](http://127.0.0.1:7123).
 
 Antes de ativar WhatsApp, automações ou submissão controlada, preencha somente no arquivo **.env** local os segredos necessários. Nunca envie esse arquivo ao Git.
+
+### Atualizar uma instalação existente
+
+Se a interface continuar antiga depois de atualizar o repositório, reconstrua o
+serviço sem reutilizar a imagem anterior. O comando abaixo preserva o diretório
+local `data/` e os volumes nomeados:
+
+~~~powershell
+git pull --ff-only
+docker compose down --remove-orphans
+docker compose build --no-cache app career-engine
+docker compose up -d --force-recreate
+~~~
+
+Confirme o commit instalado com `git rev-parse --short HEAD` antes de comparar a
+interface.
 
 ## Configuração geográfica
 

@@ -5,7 +5,8 @@ import {createServer} from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {GUPY_ACCOUNT_SCOPE,gupyTenant,validateOwnedState,authenticatedGupyPage,authenticatedGupyAccountPage} from '../src/source-connections/session-state.mjs';
+import {validateProviderState,authenticatedProviderPage} from '../src/source-connections/session-state.mjs';
+import {sessionProviderById,sessionProviderFromUrl,hostAllowed} from '../src/source-connections/session-provider-registry.mjs';
 
 // This runner only controls its own disposable context. Never reads installed browser profiles.
 export function parseAuthHandoff(handoff){
@@ -58,7 +59,8 @@ export async function runSourceAuth(handoff,{fetchImpl=fetch,loadChromium=async(
   const post=async(action,body)=>{const response=await fetchImpl(`${endpoint}/${action}`,{method:'POST',headers:{'content-type':'application/json',authorization:`Bearer ${ticket}`},body:JSON.stringify(body),signal:AbortSignal.timeout(30000),redirect:'error'});if(!response.ok)throw Error('AUTH_HANDOFF_FAILED');return response.json();};
   let managed,context,directory,failureCode='CLAIM_FAILED';
   try{
-    const request=await post('claim',{}),tenant=gupyTenant(request.loginUrl);
+    const request=await post('claim',{}),provider=sessionProviderById(request.provider)||sessionProviderFromUrl(request.loginUrl);
+    if(!provider)throw Error('SESSION_PROVIDER_UNSUPPORTED');
     failureCode='CHROMIUM_NOT_FOUND';const chromium=await loadChromium();
     failureCode='BROWSER_START_FAILED';directory=await mkdtemp(path.join(os.tmpdir(),'career-owned-auth-'));
     managed=await launchBrowser({chromium,directory,wait});context=managed.context;
@@ -74,12 +76,12 @@ export async function runSourceAuth(handoff,{fetchImpl=fetch,loadChromium=async(
       if(Date.now()-heartbeat>=5000){await post('event',{event:'HEARTBEAT'});heartbeat=Date.now();}
       for(const candidate of pages){
         let authenticated=false;
-        try{authenticated=await authenticatedGupyPage(candidate,tenant)||await authenticatedGupyAccountPage(candidate);}catch{continue;}
+        try{authenticated=await authenticatedProviderPage(candidate,provider.id);}catch{continue;}
         if(authenticated){
           const state=await context.storageState();
-          // Provider pages may load third-party cookies. Never transfer those into the application.
-          const owned={cookies:state.cookies.filter(c=>['.gupy.io','gupy.io'].includes(c.domain)&&c.secure&&['Strict','Lax','None'].includes(c.sameSite)&&typeof c.path==='string'&&c.path.startsWith('/')),origins:[]};
-          failureCode='SESSION_VALIDATION_FAILED';await post('complete',{state:validateOwnedState(owned,GUPY_ACCOUNT_SCOPE)});return {status:'SESSION_ACTIVE'};
+          // Provider pages may load third-party state. Never transfer it into the application.
+          const owned={cookies:state.cookies.filter(cookie=>provider.cookieDomains.includes(String(cookie.domain||'').toLowerCase())&&cookie.secure&&['Strict','Lax','None'].includes(cookie.sameSite)&&typeof cookie.path==='string'&&cookie.path.startsWith('/')),origins:state.origins.filter(origin=>{try{return hostAllowed(provider,new URL(origin.origin).hostname);}catch{return false;}})};
+          failureCode='SESSION_VALIDATION_FAILED';await post('complete',{state:validateProviderState(owned,provider.id)});return {status:'SESSION_ACTIVE'};
         }
       }
       await wait(1500);

@@ -101,6 +101,28 @@ test("IEL usa somente sitemap/página pública e preserva regionalização", asy
   assert.ok(fixture.calls.every((url) => !url.includes("/api/")));
 });
 
+test("IEL rejeita vagas de outra área que coincidem apenas com a região", async () => {
+  const sitemapUrl = "https://carreiras.iel.org.br/sitemap.xml",
+    relevantUrl = "https://carreiras.iel.org.br/DF/vaga/estagio/30009/tecnologia-da-informacao",
+    unrelatedUrl = "https://carreiras.iel.org.br/DF/vaga/aprendiz/30010/administracao",
+    pages = new Map([
+      [relevantUrl, jsonLdPage(jobPosting({ title: "Estágio em Tecnologia da Informação" }))],
+      [unrelatedUrl, jsonLdPage(jobPosting({ title: "Jovem Aprendiz Administrativo" }))],
+    ]),
+    provider = new IelProvider({
+      client: {
+        async getText(url) {
+          const value = String(url);
+          if (value === sitemapUrl) return { data: `<urlset><url><loc>${unrelatedUrl}</loc></url><url><loc>${relevantUrl}</loc></url></urlset>` };
+          if (pages.has(value)) return { data: pages.get(value) };
+          throw new Error(`Unexpected URL: ${value}`);
+        },
+      },
+    }),
+    result = await provider.search({ query: "Tecnologia da Informação", location: "Brasília, DF", limit: 5 });
+  assert.deepEqual(result.jobs.map((job) => job.title), ["Estágio em Tecnologia da Informação"]);
+});
+
 test("ProgramaThor preserva ID estável, remoto e escopo Brasil declarado", async () => {
   const sitemapUrl = "https://programathor.com.br/sitemap.xml";
   const jobUrl = "https://programathor.com.br/jobs/33740-engenheiro-de-ia-generativa-junior";
@@ -126,6 +148,7 @@ test("Recrutei respeita sitemap e não usa API nem query bloqueada", async () =>
   const result = await fixture.provider.search({ query: "Engenheiro IA Junior", limit: 3 });
   assert.equal(result.jobs.length, 1);
   assert.equal(result.jobs[0].providerJobId, "155283");
+  assert.equal(result.jobs[0].atsType, "recrutei");
   assert.ok(fixture.calls.every((url) => !url.includes("/api/") && !/[?&](q|keyword)=/.test(url)));
 });
 
@@ -179,7 +202,7 @@ test("Nerdin preserva origem e encaminha candidatura ao ATS externo encontrado n
 
 test("todos os providers de sitemap reutilizam a mesma resolução de destino", async () => {
   const cases = [
-    [IelProvider, "https://carreiras.iel.org.br/sitemap.xml", "https://carreiras.iel.org.br/DF/vaga/estagio/30009/tecnologia-da-informacao", "Tecnologia Informação"],
+    [IelProvider, "https://carreiras.iel.org.br/sitemap.xml", "https://carreiras.iel.org.br/DF/vaga/estagio/30009/desenvolvedor-junior", "Desenvolvedor Junior"],
     [ProgramaThorProvider, "https://programathor.com.br/sitemap.xml", "https://programathor.com.br/jobs/30009-desenvolvedor-junior", "Desenvolvedor Junior"],
     [RecruteiProvider, "https://empregos.recrutei.com.br/sitemap-vagas-1.xml", "https://empregos.recrutei.com.br/vaga/acme/30009-desenvolvedor-junior", "Desenvolvedor Junior"],
     [NerdinProvider, "https://www.nerdin.com.br/sitemap.xml", "https://www.nerdin.com.br/vaga_emprego/desenvolvedor-junior-30009.php", "Desenvolvedor Junior"],

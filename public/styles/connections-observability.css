@@ -51,3 +51,30 @@
 .connections-page select,.connections-page textarea { min-width:0;max-width:100%;width:100%; }
 .connections-page [data-auth-panel] .panel { overflow-wrap:anywhere; }
 .connections-page [data-auth-panel] { margin-block:16px; }
+
+.vaults-page .vault-summary { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); border-block:1px solid var(--line-strong); margin:24px 0; }
+.vaults-page .vault-summary div { display:grid; gap:2px; padding:18px 20px; border-right:1px solid var(--line); }
+.vaults-page .vault-summary div:last-child { border-right:0; }
+.vaults-page .vault-summary strong { font-size:1.5rem; }
+.vaults-page .vault-summary span,.vaults-page .vault-toolbar p,.vaults-page .vault-card > p { color:var(--text-soft); }
+.vaults-page .vault-toolbar { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:18px; }
+.vaults-page .vault-toolbar p { margin:0; }
+.vaults-page .vault-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+.vaults-page .vault-card { min-width:0; padding:20px; border:1px solid var(--line-strong); border-radius:var(--radius-md); background:var(--surface); box-shadow:var(--shadow-sm); }
+.vaults-page .vault-card header { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:12px; }
+.vaults-page .vault-card h2,.vaults-page .vault-contextual h2,.vaults-page .vault-contextual h3 { margin:0; }
+.vaults-page .vault-card h2 { font-size:1.15rem; }
+.vaults-page .vault-card .eyebrow { margin:0 0 4px; }
+.vaults-page .vault-card dl { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; padding-block:14px; border-block:1px solid var(--line); }
+.vaults-page .vault-card dt { color:var(--text-soft); font-size:.78rem; }
+.vaults-page .vault-card dd { margin:4px 0 0; font-weight:600; overflow-wrap:anywhere; }
+.vaults-page .vault-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:14px; }
+.vaults-page .vault-actions .button { min-height:42px; }
+.vaults-page .vault-request { margin-top:14px; padding:14px; border-left:3px solid var(--amber); background:var(--surface-soft); }
+.vaults-page .vault-request p { margin-top:0; }
+.vaults-page .vault-request small { display:block; margin-top:10px; color:var(--text-soft); }
+.vaults-page .vault-contextual { margin-top:28px; padding-top:20px; border-top:1px solid var(--line-strong); }
+.vaults-page .vault-contextual > article { display:flex; justify-content:space-between; gap:16px; margin-top:12px; padding:16px 0; border-bottom:1px solid var(--line); }
+.vaults-page :is(button,a):focus-visible { outline:3px solid var(--teal); outline-offset:3px; }
+@media(max-width:850px) { .vaults-page .vault-grid { grid-template-columns:minmax(0,1fr); } }
+@media(max-width:600px) { .vaults-page .vault-summary { grid-template-columns:minmax(0,1fr); } .vaults-page .vault-summary div { border-right:0; border-bottom:1px solid var(--line); } .vaults-page .vault-summary div:last-child { border-bottom:0; } .vaults-page .vault-toolbar { align-items:stretch; flex-direction:column; } .vaults-page .vault-card dl { grid-template-columns:minmax(0,1fr); } .vaults-page .vault-actions .button { flex:1 1 120px; } }

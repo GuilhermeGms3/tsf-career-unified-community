@@ -42,12 +42,6 @@ export class PersonioAdapter extends AssistedAtsAdapter {
   constructor() { super(PersonioAdapter.type, PersonioAdapter.version); }
 }
 
-export class TeamtailorAdapter extends AssistedAtsAdapter {
-  static type = "teamtailor";
-  static version = "teamtailor-assisted-adapter-v1";
-  constructor() { super(TeamtailorAdapter.type, TeamtailorAdapter.version); }
-}
-
 export class AblerAdapter extends AssistedAtsAdapter {static type="abler";static version="abler-assisted-adapter-v1";constructor(){super(AblerAdapter.type,AblerAdapter.version);}}
 export class QuickinAdapter extends AssistedAtsAdapter {static type="quickin";static version="quickin-assisted-adapter-v1";constructor(){super(QuickinAdapter.type,QuickinAdapter.version);}}
 export class PandapeAdapter extends AssistedAtsAdapter {static type="pandape";static version="pandape-assisted-adapter-v1";constructor(){super(PandapeAdapter.type,PandapeAdapter.version);}}
@@ -68,7 +62,6 @@ export const assistedAtsAdapterTypes = Object.freeze({
   oracle: OracleAdapter,
   successfactors: SuccessFactorsAdapter,
   personio: PersonioAdapter,
-  teamtailor: TeamtailorAdapter,
   abler:AblerAdapter,
   quickin:QuickinAdapter,
   pandape:PandapeAdapter,

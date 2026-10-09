@@ -55,9 +55,9 @@ export async function renderConnections({root,forceFresh=false}){
   if(version!==generation)return;
   const groups=[['CANDIDATURAS','Candidaturas','Acesso às plataformas e preparação de formulários.'],['EVIDÊNCIAS','Evidências profissionais','Repositórios e informações que comprovam suas habilidades.'],['DESCOBERTA','Busca de vagas','Portais usados para encontrar oportunidades.'],['OUTRAS FONTES','Outras fontes','Recursos complementares e importação manual.']];
   root.innerHTML=`<div class="page connections-page">
-    ${pageHeader({eyebrow:'Operação local',title:'Fontes e conexões',description:'Gerencie seus acessos e veja o que cada fonte permite fazer. Consultar esta tela não inicia buscas externas.'})}
+    ${pageHeader({eyebrow:'Descoberta',title:'Fontes',description:'Veja de onde as oportunidades são descobertas e a saúde de cada coleta pública. Contas e sessões ficam separadas em Cofres.'})}
     <p class="safety-banner">A busca principal é gratuita. Conectar uma conta não envia candidaturas.</p>
-    <div class="button-row"><button class="button" data-refresh>Atualizar estado local</button><a class="button" data-link href="/observability">Registros e diagnóstico</a></div>
+    <div class="button-row"><button class="button" data-refresh>Atualizar estado local</button><a class="button" data-link href="/vaults">Gerenciar cofres</a><a class="button" data-link href="/observability">Registros e diagnóstico</a></div>
     <div role="status" aria-live="polite" data-status></div><div data-general-auth-panel></div>
     ${groups.map(([key,title,description])=>{const items=sources.filter(s=>s.group===key&&!s.optional);return items.length?`<section class="connection-section" aria-label="${title}"><header class="connection-section-heading"><h2>${title}</h2><p>${description}</p></header><div class="connection-grid">${items.map(s=>card(s,gupyContext)).join('')}</div></section>`:'';}).join('')}
     <details class="connection-options"><summary>Provedores opcionais</summary><p>Brave não é necessário para o fluxo principal.</p></details>

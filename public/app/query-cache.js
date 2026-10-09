@@ -109,6 +109,7 @@ export const queryCache = new QueryCache();
 export function invalidateForMutation(path) {
   const groups = [], pathname=String(path).split("?")[0];
   if(/^\/api\/connections/.test(pathname))groups.push('/api/connections','/api/source-center','/api/observability','/api/application-batches','/api/candidate-knowledge');
+  if(/^\/api\/vaults/.test(pathname))groups.push('/api/vaults','/api/observability','/api/application-batches');
   if(/^\/api\/observability/.test(pathname))groups.push('/api/observability');
   if(pathname==="/api/unified/backup/restore"){
     queryCache.invalidate(()=>true);

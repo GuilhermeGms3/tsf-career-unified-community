@@ -16,7 +16,7 @@ Instalação por usuário, executada uma vez na pasta do projeto:
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-source-auth.ps1
 ```
 
-Abra o aplicativo em Chrome/Edge e use **Fontes e conexões → Conectar conta Gupy**. O Windows pode pedir autorização para abrir o aplicativo externo. A conexão da conta não exige escolher empresa; quando o fluxo vier de uma candidatura, o jobId continua preservado para manter o contexto. A empresa é escolhida separadamente apenas para preparar uma vaga.
+Abra o aplicativo em Chrome/Edge e use **Cofres → Gupy → Entrar**. O Windows pode pedir autorização para abrir o aplicativo externo. A conexão da conta não exige escolher empresa; quando o fluxo vier de uma candidatura, o jobId continua preservado para manter o contexto. A empresa é validada separadamente apenas ao preparar uma vaga.
 
 ### Atualização direcionada de UX (2026-08-28)
 

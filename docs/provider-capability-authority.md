@@ -8,15 +8,17 @@
 | Lever | `CONTROLLED_SUBMIT` | sim | sim | sim, com gates |
 | Ashby | `CONTROLLED_SUBMIT` | sim | sim | sim, com gates e runtime habilitado |
 | Generic | `ASSISTED_FILL` | sim | sim | não |
-| SmartRecruiters, Workable e Nerdin | `CONTROLLED_SUBMIT` | sim | sim | sim, com gates e runtime habilitado |
+| SmartRecruiters, Workable, Nerdin e Teamtailor | `CONTROLLED_SUBMIT` | sim | sim | sim, com gates e runtime habilitado |
 | IEL, Sólides, Recrutei, ProgramaThor e Remotar | `ASSISTED_FILL` | sim | sim | não |
 | InfoJobs, Vagas.com.br, Catho e GeekHunter | `ASSISTED_FILL` | sim | sim | não |
 | Gupy | `READY_TO_SUBMIT_MANUAL` | sim | sim | não |
 | Workday | `ASSISTED_FILL` | sim | sim, por etapa | não |
 | Indeed | `ASSISTED_FILL` | sim | sim | não |
-| iCIMS, Taleo, Oracle Recruiting, SuccessFactors, Personio e Teamtailor | `ASSISTED_FILL` | sim | sim | não |
+| iCIMS, Taleo, Oracle Recruiting, SuccessFactors e Personio | `ASSISTED_FILL` | sim | sim | não |
 | Abler, Quickin e Pandapé | `ASSISTED_FILL` | sim | sim | não; login, identificação ou fluxo ainda não homologado |
 | Unknown | `MANUAL` | não | não | não |
+
+O Controlled Submit do Teamtailor aceita somente páginas de vaga em hosts oficiais `*.teamtailor.com` e `*.careers-page.com`. Domínios customizados, login, CAPTCHA, MFA, formulários ainda não carregados ou confirmação ausente interrompem o envio. Um clique sem confirmação observável termina em `SUBMISSION_UNCERTAIN` e nunca é repetido automaticamente.
 
 Capability de discovery é um domínio distinto: detectar um ATS ou buscar vagas não concede autoridade para preencher ou enviar candidatura.
 

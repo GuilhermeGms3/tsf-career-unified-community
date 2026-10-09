@@ -35,7 +35,8 @@ export const navigationGroups = Object.freeze([
     items: [
       item("Busca automática", "/autopilot", "spark", "profiles"),
       item("WhatsApp", "/autopilot?section=notifications", "send", "notifications"),
-      item("Fontes e conexões", "/connections", "connection"),
+      item("Fontes", "/connections", "connection"),
+      item("Cofres", "/vaults", "lock"),
     ],
   },
   {

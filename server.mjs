@@ -35,6 +35,7 @@ import {AshbyFinalRevalidator} from "./src/application/ashby-final-revalidator.m
 import {SmartRecruitersFinalRevalidator} from "./src/application/smartrecruiters-final-revalidator.mjs";
 import {WorkableFinalRevalidator} from "./src/application/workable-final-revalidator.mjs";
 import {NerdinFinalRevalidator} from "./src/application/nerdin-final-revalidator.mjs";
+import {TeamtailorFinalRevalidator} from "./src/application/teamtailor-final-revalidator.mjs";
 import {FinalRevalidatorRouter} from "./src/application/final-revalidator-router.mjs";
 import {SubmissionReconciliationService} from "./src/application/submission-reconciliation-service.mjs";
 import { LiveInspector } from "./src/automation/live-inspector.mjs";
@@ -216,7 +217,8 @@ const ashbyFinalRevalidator=new AshbyFinalRevalidator({store:unifiedStore,dataDi
 const smartRecruitersFinalRevalidator=new SmartRecruitersFinalRevalidator({store:unifiedStore,dataDir:hubDataDir,registry:applicationEngine.registry,browserManager:submissionBrowserManager});
 const workableFinalRevalidator=new WorkableFinalRevalidator({store:unifiedStore,dataDir:hubDataDir,registry:applicationEngine.registry,browserManager:submissionBrowserManager});
 const nerdinFinalRevalidator=new NerdinFinalRevalidator({store:unifiedStore,dataDir:hubDataDir,registry:applicationEngine.registry,browserManager:submissionBrowserManager});
-const finalRevalidator=new FinalRevalidatorRouter({store:unifiedStore,browserManager:submissionBrowserManager,revalidators:{greenhouse:greenhouseFinalRevalidator,lever:leverFinalRevalidator,ashby:ashbyFinalRevalidator,smartrecruiters:smartRecruitersFinalRevalidator,workable:workableFinalRevalidator,nerdin:nerdinFinalRevalidator}});
+const teamtailorFinalRevalidator=new TeamtailorFinalRevalidator({store:unifiedStore,dataDir:hubDataDir,registry:applicationEngine.registry,browserManager:submissionBrowserManager});
+const finalRevalidator=new FinalRevalidatorRouter({store:unifiedStore,browserManager:submissionBrowserManager,revalidators:{greenhouse:greenhouseFinalRevalidator,lever:leverFinalRevalidator,ashby:ashbyFinalRevalidator,smartrecruiters:smartRecruitersFinalRevalidator,workable:workableFinalRevalidator,nerdin:nerdinFinalRevalidator,teamtailor:teamtailorFinalRevalidator}});
 const submissionTransport=new AdapterSubmissionTransport({registry:applicationEngine.registry,revalidator:finalRevalidator,allowExternal:submissionEnabled,allowLocalFixtures:false});
 const submissionPreflight=new SubmissionPreflight({store:unifiedStore,dataDir:hubDataDir,registry:applicationEngine.registry,revalidator:finalRevalidator,policy:{submissionEnabled}});
 const submissionConsentService=new SubmissionConsentService({store:unifiedStore});
@@ -2399,7 +2401,8 @@ for(const eventType of ["RESUME_VERSION_APPROVED","RESUME_RENDER_READY"])
 eventBus.on("RESUME_TAILORING_REVIEW_REQUIRED",event=>{
   if(event.payload?.approvalRequestId)void whatsappApprovalGateway.notifyResumeRevisionReady(event.payload);
 });
-sourceAuth.onAuthenticated=async tenant=>{
+sourceAuth.onAuthenticated=async (provider,tenant)=>{
+  if(provider!=='gupy')return;
   for(const row of unifiedStore.database.connection.prepare("SELECT id FROM application_drafts WHERE status='WAITING_USER' AND locked_by IS NULL").all()){
     const draft=unifiedStore.applicationBatches.findItem(row.id);
     if(/AUTH|LOGIN/.test(draft.reason||'')&&new URL(draft.applicationUrl).hostname===tenant&&applicationBatchService.canRetry(draft))applicationBatchService.queue(draft.id,draft.mode);
@@ -2930,7 +2933,7 @@ const server = createServer(async (req, res) => {
     return;
   }
 
-  const deepLink = url.pathname === "/analyze" || /^\/(opportunities|resumes|resume-batches|application-batches|applications|autopilot|knowledge|settings|connections|observability|quality-lab)(\/|$)/.test(url.pathname);
+const deepLink = url.pathname === "/analyze" || /^\/(opportunities|resumes|resume-batches|application-batches|applications|autopilot|knowledge|settings|connections|vaults|observability|quality-lab)(\/|$)/.test(url.pathname);
   const requested = url.pathname === "/" || deepLink ? "index.html" : url.pathname.slice(1);
   const file = path.normalize(path.join(publicDir, requested));
   if (!file.startsWith(publicDir)) {

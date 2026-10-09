@@ -40,6 +40,7 @@ const SYNONYMS = Object.freeze({
   internship: ["estagio", "estagiario", "estagiaria"],
   junior: ["junior", "jr"],
   software: ["software", "sistemas", "tecnologia"],
+  ti: ["tecnologia", "informacao", "tecnologia da informacao"],
 });
 
 const clean = (value) =>
@@ -183,6 +184,25 @@ function queryTerms(query) {
   return [...new Set(terms.flatMap((term) => [term, ...(SYNONYMS[term] || [])]).map(fold))];
 }
 
+function queryTermGroups(query) {
+  return fold(query)
+    .split(/[^a-z0-9+#.-]+/)
+    .map((item) => item.replace(/^[.-]+|[.-]+$/g, ""))
+    .filter((item) => item.length >= 2 && !STOP_WORDS.has(item))
+    .map((term) => [...new Set([term, ...(SYNONYMS[term] || [])].map(fold))]);
+}
+
+function matchesStructuredJobQuery(job, query) {
+  const groups = queryTermGroups(query);
+  if (!groups.length) return true;
+  const searchable = fold(`${job.title} ${job.seniority} ${job.employmentType}`);
+  const includesTerm = (term) => term.length > 2
+    ? searchable.includes(term)
+    : new RegExp(`(?:^|[^a-z0-9])${term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:$|[^a-z0-9])`).test(searchable);
+  const matches = groups.filter((group) => group.some(includesTerm)).length;
+  return matches >= Math.min(2, groups.length);
+}
+
 function urlScore(url, query, location) {
   const text = fold(decodeURIComponent(url));
   const terms = queryTerms(query);
@@ -261,7 +281,7 @@ function normalizeJobPosting({ provider, sourceClass, url, job, html = "" }) {
     sourceUrl: url,
     canonicalUrl: url,
     applicationUrl: destination.applicationUrl || url,
-    atsType: destination.kind === "KNOWN_ATS" ? destination.applicationProvider : "",
+    atsType: destination.applicationProvider !== "unknown" ? destination.applicationProvider : "",
     lifecycleStatus: expired ? "CLOSED" : "OPEN",
     metadata: {
       sourceClass,
@@ -310,6 +330,9 @@ class SitemapJobProvider {
       scope: "PUBLIC_FEED",
       message: "Página pública e política de acesso responderam.",
     });
+  }
+  acceptJob() {
+    return true;
   }
   async search({ query = "", location = "Brasil", limit = 10 } = {}) {
     const { data } = await this.client.getText(this.sitemapUrl, {
@@ -364,7 +387,7 @@ class SitemapJobProvider {
         if (item.status === "rejected") failures++;
         else {
           processedItems.push(item.value.processed);
-          if (item.value.job?.lifecycleStatus === "OPEN") jobs.push(item.value.job);
+          if (item.value.job?.lifecycleStatus === "OPEN" && this.acceptJob(item.value.job, { query, location })) jobs.push(item.value.job);
         }
       }
     }
@@ -421,6 +444,9 @@ export class IelProvider extends SitemapJobProvider {
       jobUrlPattern: /^https:\/\/carreiras\.iel\.org\.br\/[A-Z]{2}\/vaga\//i,
       sourceClass: "INTERNSHIP_PORTAL",
     });
+  }
+  acceptJob(job, { query }) {
+    return matchesStructuredJobQuery(job, query);
   }
 }
 
@@ -779,6 +805,7 @@ export const brazilianProviderInternals = Object.freeze({
   normalizeJobPosting,
   opportunityType,
   queryTerms,
+  matchesStructuredJobQuery,
   structuredJobs,
   urlScore,
 });

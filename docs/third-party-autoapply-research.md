@@ -21,4 +21,4 @@ Foram rejeitados os padrões que:
 - repetem o clique após timeout;
 - consideram navegação ou mudança de texto como recibo suficiente.
 
-Indeed, iCIMS, Taleo, Oracle Recruiting, SuccessFactors, Personio e Teamtailor permanecem em `ASSISTED_FILL`. A promoção individual para `CONTROLLED_SUBMIT` exige fixture representativa, target policy, revalidador final, boundary de ação única, confirmação positiva, recibo e homologação controlada.
+Indeed, iCIMS, Taleo, Oracle Recruiting, SuccessFactors e Personio permanecem em `ASSISTED_FILL`. Teamtailor foi promovido posteriormente para `CONTROLLED_SUBMIT` com fixture representativa, target policy, revalidador final, boundary de ação única e confirmação positiva; a homologação externa positiva ainda depende de candidatura explicitamente autorizada.

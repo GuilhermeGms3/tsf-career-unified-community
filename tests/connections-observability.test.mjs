@@ -25,7 +25,7 @@ const withFixture=fn=>async()=>{const f=await fixture();try{await fn(f);}finally
 test('capability projection includes actual sources, limited LinkedIn and tenant-only Workday',()=>{
   const items=connectionCapabilities();assert.equal(new Set(items.map(i=>i.providerId)).size,items.length);
   for(const id of ['gupy','github','linkedin','indeed','workday','solides','recrutei','programathor','iel','greenhouse','lever','ashby'])assert.ok(items.some(i=>i.providerId===id));
-  assert.equal(items.find(i=>i.providerId==='workday').capabilities.APPLICATION_FILL,'SUPPORTED_LIMITED');assert.equal(items.find(i=>i.providerId==='workday').capabilities.CONTROLLED_SUBMIT,'NOT_SUPPORTED');assert.equal(items.find(i=>i.providerId==='linkedin').authMode,'NOT_MANAGED');assert.equal(items.find(i=>i.providerId==='indeed').authMode,'NONE');
+  assert.equal(items.find(i=>i.providerId==='workday').capabilities.APPLICATION_FILL,'SUPPORTED_LIMITED');assert.equal(items.find(i=>i.providerId==='workday').capabilities.CONTROLLED_SUBMIT,'NOT_SUPPORTED');assert.equal(items.find(i=>i.providerId==='linkedin').authMode,'NOT_MANAGED');assert.equal(items.find(i=>i.providerId==='indeed').authMode,'INTERACTIVE_SESSION');assert.equal(items.find(i=>i.providerId==='indeed').sessionManaged,true);
 });
 test('readiness is local, Brave harmless, GitHub evidence survives disconnection',withFixture(async f=>{
   await f.auth.disconnect('github');const sources=await f.readiness.list();assert.equal(f.probes,0);assert.equal(f.syncs,0);assert.equal(sources.find(s=>s.providerId==='brave-public-web').health,'UNKNOWN');assert.equal(sources.find(s=>s.providerId==='brave-public-web').requiredForCoreProduct,false);assert.equal(sources.find(s=>s.providerId==='github').persistedEvidenceAvailable,true);

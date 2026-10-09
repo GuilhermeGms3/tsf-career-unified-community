@@ -1,0 +1,45 @@
+# Cofres de sessão
+
+`Cofres` separa autenticação de candidato da descoberta pública de vagas. Uma fonte pode continuar encontrando vagas sem que exista uma conta conectada; a sessão só é consumida quando o destino final da candidatura exigir autenticação.
+
+## Portais gerenciados
+
+- Gupy
+- Indeed
+- Sólides Vagas
+- Recrutei
+- IEL Carreiras
+- InfoJobs
+- Catho
+- Vagas.com.br
+- ProgramaThor
+- GeekHunter
+
+Workday permanece contextual por empresa e é solicitado durante a preparação da candidatura. LinkedIn continua sem sessão gerenciada pelo TSF.
+
+## Fluxo
+
+1. O usuário escolhe **Entrar** ou **Criar conta** em `Cofres`.
+2. O backend emite um handoff local, curto e de uso único.
+3. O auxiliar abre uma instalação local do Chrome em um perfil temporário exclusivo.
+4. Senha, CAPTCHA, MFA e confirmação por e-mail são concluídos pelo usuário diretamente no portal.
+5. O runner exige evidência positiva de autenticação e envia somente cookies/origens pertencentes ao portal.
+6. O backend revalida a sessão em um segundo contexto antes de armazená-la.
+7. O estado mínimo é cifrado com AES-256-GCM pelo `CredentialVault`; SQLite guarda apenas referência, status e datas.
+8. O perfil temporário é destruído. Sessões expiram, podem ser verificadas e podem ser desconectadas individualmente.
+
+O sistema não lê perfis normais do navegador, não acessa cofres de senha e não tenta contornar desafios humanos.
+
+## Contratos
+
+- `GET /api/vaults`: catálogo e estado local dos cofres.
+- `POST /api/vaults/:provider/connect`: abre login oficial.
+- `POST /api/vaults/:provider/create`: abre cadastro oficial.
+- `POST /api/vaults/:provider/check`: revalida uma sessão ativa.
+- `POST /api/vaults/:provider/disconnect`: remove somente a sessão desse portal.
+
+O protocolo `career-unified-auth://` continua local e precisa ser instalado explicitamente com `scripts/install-source-auth.ps1`.
+
+## Limites operacionais
+
+Os portais podem mudar URL, cookies, textos e desafios. Uma policy no registry habilita o fluxo, mas uma sessão somente vira `SESSION_ACTIVE` depois da evidência positiva e da revalidação. Falha, CAPTCHA pendente, MFA pendente, e-mail pendente ou evidência ambígua mantêm a operação em estado humano, sem fabricar sucesso.

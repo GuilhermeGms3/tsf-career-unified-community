@@ -159,7 +159,7 @@ test("página oficial resolve CTA por vaga sem cruzar links entre JobPostings", 
 
 test("registry separa preenchimento assistido de destinos com envio controlado", () => {
   const registry = new AdapterRegistry();
-  const assisted = ["generic", "iel", "solides", "recrutei", "programathor", "remotar", "infojobs", "vagas", "catho", "geekhunter", "indeed", "icims", "taleo", "oracle", "successfactors", "personio", "teamtailor", "abler", "quickin", "pandape"];
+  const assisted = ["generic", "iel", "solides", "recrutei", "programathor", "remotar", "infojobs", "vagas", "catho", "geekhunter", "indeed", "icims", "taleo", "oracle", "successfactors", "personio", "abler", "quickin", "pandape"];
   for (const provider of assisted) {
     const capability = registry.describe(provider);
     assert.equal(capability.level, "ASSISTED_FILL", provider);
@@ -167,7 +167,7 @@ test("registry separa preenchimento assistido de destinos com envio controlado",
     assert.equal(capability.canSubmit, false, provider);
     assert.equal(typeof registry.get(provider).submit, "undefined", provider);
   }
-  for (const provider of ["smartrecruiters", "workable", "nerdin"]) {
+  for (const provider of ["smartrecruiters", "workable", "nerdin", "teamtailor"]) {
     const capability = registry.describe(provider);
     assert.equal(capability.level, "CONTROLLED_SUBMIT", provider);
     assert.equal(capability.canSubmit, true, provider);
@@ -179,8 +179,9 @@ test("registry separa preenchimento assistido de destinos com envio controlado",
   assert.equal(registry.describe("unknown").canFill, false);
 });
 
-test("resolve identidades de candidatura Nerdin, Abler, Quickin e Pandapé",()=>{
+test("resolve identidades de candidatura Nerdin, Teamtailor, Abler, Quickin e Pandapé",()=>{
   assert.deepEqual(new SourceResolver().resolve("https://www.nerdin.com.br/vaga_candidatura.php?id=98743"),{atsType:"nerdin",canonicalTarget:true,url:"https://www.nerdin.com.br/vaga_candidatura.php?id=98743",organizationKey:"portal",providerJobId:"98743"});
+  const teamtailor=new SourceResolver().resolve("https://acme.teamtailor.com/jobs/7748148-support-engineer");assert.equal(teamtailor.organizationKey,"acme");assert.equal(teamtailor.providerJobId,"7748148");
   const abler=new SourceResolver().resolve("https://candidatos.abler.com.br/vagas/abc123");assert.equal(abler.organizationKey,"portal");assert.equal(abler.providerJobId,"abc123");
   const quickin=new SourceResolver().resolve("https://jobs.quickin.io/globalti/jobs/abc123");assert.equal(quickin.organizationKey,"globalti");assert.equal(quickin.providerJobId,"abc123");
   const pandape=new SourceResolver().resolve("https://minsaitbrasil.pandape.infojobs.com.br/ApplyCT/3784346");assert.equal(pandape.organizationKey,"minsaitbrasil");assert.equal(pandape.providerJobId,"3784346");

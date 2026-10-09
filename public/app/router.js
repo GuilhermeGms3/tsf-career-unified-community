@@ -31,6 +31,7 @@ export function currentRoute() {
     "/knowledge": "knowledge",
     "/settings": "settings",
     "/connections": "connections",
+    "/vaults": "vaults",
     "/observability": "observability",
     "/quality-lab": "quality-lab",
   };

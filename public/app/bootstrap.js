@@ -21,6 +21,7 @@ import { renderAnalyzeJob } from "../features/analyze-job/page.js";
 import { renderResumeBatchWorkspace } from "../features/resume-batches/page.js";
 import { renderApplicationBatches } from "../features/application-batches/page.js";
 import { renderConnections } from "../features/connections/page.js";
+import { renderVaults } from "../features/vaults/page.js";
 import { renderObservability } from "../features/observability/page.js";
 import { renderQualityLab } from "../features/quality-lab/page.js";
 import { api, queryCache } from "../api/client.js";
@@ -45,6 +46,7 @@ const renderers = {
   knowledge: renderKnowledge,
   settings: renderSettings,
   connections: renderConnections,
+  vaults: renderVaults,
   observability: renderObservability,
   "quality-lab": renderQualityLab,
 };
@@ -137,6 +139,7 @@ async function renderRoute(route, { revalidation = false } = {}) {
 
 function routeUsesKey(route, key) {
   if(route.name==='connections')return key.startsWith('GET:/api/connections');
+  if(route.name==='vaults')return key.startsWith('GET:/api/vaults');
   if(route.name==='observability')return key.startsWith('GET:/api/observability');
   if (["application-batch","application-batches"].includes(route.name))return key.startsWith("GET:/api/application-batches");
   if (route.name === "today")

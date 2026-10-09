@@ -5,7 +5,7 @@ import {currentRoute} from "../public/app/router.js";
 
 test("navegação agrupada preserva rotas raiz e deep links existentes",()=>{
   assert.deepEqual(navigationGroups.map(group=>group.label),["Trabalho","Automação","Conhecimento","Sistema"]);
-  for(const path of ["/","/opportunities","/resumes","/applications","/knowledge","/autopilot","/settings","/connections","/observability"]){
+  for(const path of ["/","/opportunities","/resumes","/applications","/knowledge","/autopilot","/settings","/connections","/vaults","/observability"]){
     const route={path,section:""};
     assert.ok(navigation.some(item=>item.matches(route)),`rota ${path} precisa continuar navegável`);
   }
@@ -16,9 +16,9 @@ test("navegação agrupada preserva rotas raiz e deep links existentes",()=>{
 
 test("grupos preservam todas as abas e usam rótulos de produto",()=>{
   const paths=navigation.map(item=>item.path);
-  for(const path of ["/","/opportunities","/applications","/resumes","/knowledge","/autopilot","/connections","/observability","/settings"])assert.ok(paths.includes(path));
+  for(const path of ["/","/opportunities","/applications","/resumes","/knowledge","/autopilot","/connections","/vaults","/observability","/settings"])assert.ok(paths.includes(path));
   assert.deepEqual(navigationGroups.find(group=>group.label==="Trabalho").items.map(item=>item.label),["Hoje","Vagas","Candidaturas","Currículos"]);
-  assert.deepEqual(navigationGroups.find(group=>group.label==="Automação").items.map(item=>item.label),["Busca automática","WhatsApp","Fontes e conexões"]);
+  assert.deepEqual(navigationGroups.find(group=>group.label==="Automação").items.map(item=>item.label),["Busca automática","WhatsApp","Fontes","Cofres"]);
   assert.equal(navigationGroups.some(group=>/Discovery|Evidence|Intelligence/.test(group.label)),false);
 });
 

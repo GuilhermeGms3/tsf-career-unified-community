@@ -1119,7 +1119,7 @@ test("Playwright mantém Configurações > Integrações restrita ao n8n", async
     await page.getByRole("heading", { name: "n8n" }).waitFor();
     assert.equal(await page.getByText("Brave Public Web",{exact:true}).count(),0);
     assert.equal(await page.locator(".integrations-authority").getByRole("heading",{name:"WhatsApp"}).count(),0);
-    assert.match(await page.locator(".integrations-authority").innerText(),/Fontes ficam em Fontes e conexões/);
+    assert.match(await page.locator(".integrations-authority").innerText(),/Descoberta fica em Fontes, contas de portais ficam em Cofres/);
   } finally {
     await browser.close();
   }

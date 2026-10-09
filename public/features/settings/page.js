@@ -47,7 +47,7 @@ export async function renderSettings({ root }) {
         href: `/settings?section=${id}`,
       })),
       section,
-    )}<section class="settings-panel integrations-authority"><div class="section-heading"><div><p class="eyebrow">Automação externa</p><h2>Integrações</h2><p>O n8n é a única integração operacional configurada nesta área. Fontes ficam em Fontes e conexões; WhatsApp fica na seção própria da Automação.</p></div></div><div data-integrations-host></div></section></div>`;
+    )}<section class="settings-panel integrations-authority"><div class="section-heading"><div><p class="eyebrow">Automação externa</p><h2>Integrações</h2><p>O n8n é a única integração operacional configurada nesta área. Descoberta fica em Fontes, contas de portais ficam em Cofres e WhatsApp fica na seção própria da Automação.</p></div></div><div data-integrations-host></div></section></div>`;
     const n8nRequest = api("/api/integrations/n8n").catch((error) => ({ error }));
     const host = root.querySelector("[data-integrations-host]");
     host.innerHTML = "";

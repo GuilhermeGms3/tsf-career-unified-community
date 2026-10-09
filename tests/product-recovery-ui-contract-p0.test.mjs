@@ -9,7 +9,7 @@ test("navegação orientada a tarefas preserva áreas existentes sem duplicar a 
   const [navigation,router,bootstrap,opportunities]=await Promise.all([source("public/app/navigation.js"),source("public/app/router.js"),source("public/app/bootstrap.js"),source("public/features/opportunities/page.js")]);
   for(const group of ["Trabalho","Automação","Conhecimento","Sistema"])assert.match(navigation,new RegExp(`label:\\s*"${group}"`));
   for(const label of ["Hoje","Vagas","Candidaturas","Currículos","Meu perfil"])assert.match(navigation,new RegExp(`item\\("${label}"`));
-  for(const advanced of ["Fontes e conexões","Busca automática","Laboratório de qualidade","Observabilidade","Configurações"])assert.match(navigation,new RegExp(advanced));
+  for(const advanced of ["Fontes","Cofres","Busca automática","Laboratório de qualidade","Observabilidade","Configurações"])assert.match(navigation,new RegExp(advanced));
   assert.doesNotMatch(navigation,/Analisar uma vaga/);
   assert.match(opportunities,/Adicionar vaga por link ou texto/);
   assert.doesNotMatch(navigation,/item\("Currículos em lote",/);
