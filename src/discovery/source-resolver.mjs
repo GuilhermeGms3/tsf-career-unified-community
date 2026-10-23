@@ -10,7 +10,11 @@ export class SourceResolver{
       if(atsType==="unknown")return {atsType:"unknown",canonicalTarget:false,url:url.toString(),organizationKey:"",providerJobId:""};
       let organizationKey="",providerJobId="";
       if(atsType==="greenhouse"){organizationKey=url.searchParams.get("for")||parts[0]||"";providerJobId=parts.at(-1)||url.searchParams.get("token")||"";}
-      else if(["lever","ashby","smartrecruiters"].includes(atsType)){organizationKey=parts[0]||"";providerJobId=atsType==="ashby"&&["application","apply"].includes(parts.at(-1))?parts.at(-2)||"":parts.at(-1)||"";}
+      else if(["lever","ashby","smartrecruiters"].includes(atsType)){
+        organizationKey=parts[0]||"";
+        const jobPart=["application","apply"].includes(parts.at(-1))?parts.at(-2):parts.at(-1);
+        providerJobId=atsType==="smartrecruiters"?(jobPart?.match(/^\d+/)?.[0]||""):parts.length>1?jobPart||"":"";
+      }
       else if(atsType==="workable"){organizationKey=workableOrganization(url.hostname==="apply.workable.com"?parts[0]:hostParts[0]);providerJobId=parts.includes("j")?parts[parts.indexOf("j")+1]||"":parts.at(-1)||"";}
       else if(atsType==="gupy"){organizationKey=hostParts[0]==="portal"?parts[0]||"":hostParts[0]||parts[0]||"";providerJobId=parts.at(-1)||"";}
       else if(atsType==="teamtailor"){organizationKey=hostParts[0]||"portal";providerJobId=parts[0]==="jobs"?(parts[1]?.match(/^\d+/)?.[0]||""):"";}

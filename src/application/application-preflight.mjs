@@ -6,6 +6,7 @@ export class ApplicationPreflight {
     const reasons=[];const application=this.store.applications.findById(applicationId);if(!application)return {status:"BLOCKED",reasons:["APPLICATION_NOT_FOUND"]};
     const job=this.store.jobs.findById(application.jobId);const plan=this.store.applicationPlans.forApplication(applicationId);const analysis=plan?.analysisId?this.store.analyses.findById(plan.analysisId):null;
     if(!job)reasons.push("JOB_NOT_FOUND");else try{validateAutomationUrl(job.applicationUrl||job.canonicalUrl||job.url)}catch{reasons.push("INVALID_JOB_URL")}
+    if(job?.lifecycleStatus==="CLOSED"||job?.availability?.status==="CLOSED")reasons.push("JOB_CLOSED","POLICY_BLOCKED");
     if(!plan)reasons.push("PLAN_NOT_FOUND");if(!analysis)reasons.push("ATS_ANALYSIS_NOT_FOUND");
     if(analysis?.eligibility==="NOT_ELIGIBLE"||plan?.decision==="BLOCKED"||plan?.decision==="SKIP")reasons.push("POLICY_BLOCKED");
     const resume=plan?.selectedResumeId?this.store.resumes.findById(plan.selectedResumeId):null,version=plan?.selectedResumeVersionId?this.store.resumeVersions?.findById(plan.selectedResumeVersionId):null,artifact=version?this.store.resumeArtifacts?.latest(version.id,"PDF"):null;

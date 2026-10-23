@@ -30,6 +30,20 @@ test("P1 projection pre-indexes analyses, requirements and items in linear passe
   assert.deepEqual(f.calls, { jobs: 1, analyses: 1, requirements: 1, items: 1, forJob: 0, forAnalysis: 0 });
 });
 
+test("projection carrega cada intent uma vez e libera o loop durante o ranking", async () => {
+  const f = fixture(200);
+  f.store.jobHuntProfiles.all = () => [{ id: "profile", jobFamilies: ["BACKEND"], searchIntentVersion: 1 }];
+  let queries = 0, yielded = false;
+  f.store.searchIntents = { forProfile: () => { queries++; return { families: ["BACKEND"], locationPolicy: {} }; } };
+  const service = new OpportunityService({ store: f.store, profileProvider: async () => ({}) });
+  const nextTick = new Promise(resolve => setImmediate(() => { yielded = true; resolve(); }));
+  const projection = await service.list();
+  assert.equal(queries, 1);
+  assert.equal(yielded, true);
+  assert.equal(projection.length, 200);
+  await nextTick;
+});
+
 test("P1 projection revision invalidates on persisted mutation without rescanning tables on cached reads", async () => {
   const f = fixture(182);
   const service = new OpportunityService({ store: f.store, profileProvider: async () => ({}) });

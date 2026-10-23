@@ -4,8 +4,9 @@ export class ResumeDocumentWorker {
     handlers = {},
     concurrency = 1,
     pollIntervalMs = 1000,
+    claimOptions = {},
   } = {}) {
-    Object.assign(this, { repository, handlers, pollIntervalMs });
+    Object.assign(this, { repository, handlers, pollIntervalMs, claimOptions });
     this.concurrency = Math.max(1, Number(concurrency) || 1);
     this.running = 0;
     this.pumping = false;
@@ -42,7 +43,7 @@ export class ResumeDocumentWorker {
     try {
       while (this.running < this.concurrency) {
         const job = this.repository.claim(
-          `resume-worker-${process.pid}-${this.running + 1}`,
+          `resume-worker-${process.pid}-${this.running + 1}`, this.claimOptions,
         );
         if (!job) break;
         this.running++;

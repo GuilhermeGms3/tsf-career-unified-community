@@ -269,6 +269,41 @@ async function jsonRoute(page, pattern, body, status = 200) {
   );
 }
 
+test("Mass Hunt: histórico permite repetir somente o portal e reabre radar", async () => {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  const errors = [];
+  page.on("pageerror", error => errors.push(error.message));
+  let source = "";
+  const styles = [...(await readFile(path.join(root, "index.html"), "utf8")).matchAll(/<link[^>]+rel="stylesheet"[^>]*>/g)].map(match => match[0]).join("");
+  await page.route("**/recovery-test.html*", route => route.fulfill({ contentType: "text/html", body: `<html lang="pt-BR"><head><meta name="viewport" content="width=device-width,initial-scale=1">${styles}</head><body><main id="root"></main><script type="module">import {renderOpportunities} from "/features/opportunities/page.js";renderOpportunities({root:document.querySelector("#root")});</script></body></html>` }));
+  await page.route("**/api/**", route => {
+    const url = new URL(route.request().url());
+    if (url.pathname.endsWith(".js")) return route.continue();
+    let body = { ok: true, opportunities: [], pagination: { total: 0 }, runs: [], profiles: [] };
+    if (url.pathname === "/api/job-hunt/runs") body.runs = [{ id: "run-recovery", status: "PARTIAL", startedAt: new Date().toISOString(), sourceRecovery: [{ provider: "recrutei", called: true, status: "ERROR", recovery: { message: "Falha temporária HTTP 502. Tente novamente mais tarde." }, skippedRequests: 4 }] }];
+    if (url.pathname === "/api/job-hunt/runs/run-recovery/source") {
+      source = route.request().postDataJSON().source;
+      body = { ok: true, runId: "run-targeted", status: "RUNNING" };
+    }
+    if (url.pathname === "/api/job-hunt/runs/run-targeted") body = { ok: true, run: { id: "run-targeted", status: "RUNNING", report: { progress: { stage: "DISCOVERY" }, sourceReports: [] } }, logs: [] };
+    return route.fulfill({ contentType: "application/json", body: JSON.stringify(body) });
+  });
+  try {
+    await page.goto(`${baseUrl}/recovery-test.html?section=history`);
+    await page.getByRole("button", { name: "Buscar só recrutei" }).waitFor();
+    await page.getByText("Falha temporária HTTP 502. Tente novamente mais tarde.").waitFor();
+    await captureReference(page, "mass-hunt-source-recovery-desktop.png");
+    await page.getByRole("button", { name: "Buscar só recrutei" }).click();
+    await page.getByText("Busca direcionada iniciada, sem gerar currículos ou candidaturas.").waitFor();
+    assert.equal(source, "recrutei");
+    await page.locator('[data-mass-hunt-panel]:not([hidden])').waitFor();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.getByRole("button", { name: "Minimizar radar" }).click();
+    await captureReference(page, "mass-hunt-source-recovery-mobile.png");
+    assert.deepEqual(errors, []);
+  } finally { await page.close(); }
+});
+
 test("Experience V2 jornada 1: descobrir, abrir, analisar e revisar evidências", async () => {
   const page = await browser.newPage();
   let analyzed = false;
@@ -578,7 +613,7 @@ test("Experience V2 jornada 3: currículo aprovado, planner e workspace da candi
   });
   await page.goto(`${baseUrl}/opportunities/job-v2?tab=application`);
   await page.getByRole("button", { name: "Preparar candidatura" }).click();
-  await page.getByRole("heading", { name: "Decisão do planner" }).waitFor();
+  await page.locator(".application-stepper").waitFor();
   assert.equal(new URL(page.url()).pathname, "/applications/application-1");
   await page.close();
 });
@@ -613,7 +648,7 @@ test("Experience V2 jornada 4: USER_REQUIRED na caixa, deep link e resposta", as
   );
   await page.goto(baseUrl);
   await page.getByRole("link", { name: "Responder" }).first().click();
-  await page.getByRole("link", { name: "Perguntas" }).click();
+  await page.getByRole("link", { name: "Perguntas", exact: true }).click();
   await page.getByLabel("Sua resposta").fill("Em 15 dias");
   await page.getByRole("button", { name: "Salvar resposta" }).click();
   await page.getByText("Resposta salva.", { exact: true }).waitFor();
@@ -696,10 +731,9 @@ test("Experience V2 jornada 5: status, tentativa e timeline auditável", async (
   await page.setViewportSize({ width: 390, height: 844 });
   await captureReference(page, "applications-mobile.png");
   await page.setViewportSize({ width: 1280, height: 720 });
-  await page.getByLabel("Seções").getByRole("link", { name: "Entrevistas" }).click();
+  await page.getByLabel("Acompanhamento e preparação").getByRole("link", { name: "Entrevistas" }).click();
   await page.getByText("Agendada", { exact: true }).waitFor();
-  await page.getByText("Mais opções de acompanhamento").click();
-  await page.getByRole("link", { name: "Retornos pendentes" }).click();
+  await page.getByRole("link", { name: "Retornos", exact: true }).click();
   await page.getByText("Responder pendências", { exact: true }).waitFor();
   await page.goto(`${baseUrl}/applications/application-1?tab=attempts`);
   await page.getByText("Tentativa 1").waitFor();
@@ -725,9 +759,9 @@ test("Experience V2 jornada 6: Autopilot, execução, notificação e deep link"
       },
     ],
   });
-  await jsonRoute(page, "**/api/automation/status", {
+  await jsonRoute(page, "**/api/job-hunt/runs?limit=20", {
     ok: true,
-    recentRuns: [
+    runs: [
       {
         id: "run-1",
         profileId: "profile-1",

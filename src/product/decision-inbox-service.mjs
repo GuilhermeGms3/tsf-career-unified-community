@@ -34,6 +34,7 @@ export class DecisionInboxService{
     const profiles=this.store.jobHuntProfiles?.all?.()||[],activeProfile=profiles.find(item=>item.enabled)||profiles[0]||null,activeIntent=activeProfile?this.store.searchIntents?.forProfile?.(activeProfile.id):null,locationPolicy=activeIntent?.locationPolicy||activeProfile?.locationPolicy||{};
 
     for(const application of applications){
+      if(this.store.jobs.findById(application.jobId)?.lifecycleStatus==="CLOSED" && !["SUBMITTED","SUBMISSION_UNCERTAIN","SUBMITTING","INTERVIEW","OFFER","HIRED"].includes(application.status))continue;
       const journey=buildApplicationJourney(application,this.store.applications.events(application.id));
       const pendingQuestions=this.store.applicationQuestions.forApplication(application.id).filter(item=>item.answerStatus==="USER_REQUIRED"),question=pendingQuestions[0];
       if(question)add({key:`question:${question.id}`,category:"APPLICATIONS",inboxPriority:112,title:pendingQuestions.length===1?"Responder pergunta obrigatória":`Responder ${pendingQuestions.length} perguntas obrigatórias`,description:pendingQuestions.length===1?question.label:`${question.label} e mais ${pendingQuestions.length-1} pendência(s).`,why:[question.reasonRequired||"A candidatura precisa das suas respostas antes de continuar."],cta:{label:"Responder agora",view:"applications",applicationId:application.id,tab:"questions",questionId:question.id},dismissible:true});

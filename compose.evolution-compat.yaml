@@ -1,0 +1,6 @@
+services:
+  evolution-api:
+    build:
+      context: ./docker/evolution-compat
+      dockerfile: Dockerfile
+    image: tsf-evolution-compat:2.3.7-baileys-rc13

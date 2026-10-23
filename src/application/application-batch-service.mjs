@@ -7,6 +7,8 @@ import {validateResumeArtifact} from "../automation/automation-validation.mjs";
 import {resolveApplicationFields,isResolved,validateAnswer,fingerprint} from "./application-field-schema.mjs";
 import {ControlledSubmissionService} from "./controlled-submission-service.mjs";
 import {SubmissionConsentService} from "./submission-consent-service.mjs";
+import {gupyConfirmedAnswers,publishGupyQuestions} from "./gupy-question-bridge.mjs";
+import {classifyAutomationFailure} from "../automation/automation-failure.mjs";
 
 const fail=code=>{throw Object.assign(new Error(code),{code,status:409});};
 const now=()=>new Date().toISOString();
@@ -17,7 +19,7 @@ export class ApplicationBatchService {
   constructor({store,dataDir,profileProvider,opportunityService,browserManager,headless=true,adapter=new GupyApplicationAdapter(),submissionEnabled=false,allowLocalFixtures=false,sourceReadiness=null,sourceAuth=null}){
     Object.assign(this,{sourceReadiness,sourceAuth});
     Object.assign(this,{store,dataDir,profileProvider,opportunityService,adapter,submissionEnabled,allowLocalFixtures});
-    this.repository=store.applicationBatches;this.browser=browserManager||new BrowserManager({dataDir,headless,timeout:10000});this.submitting=new Map();this.activeBrowsers=0;
+    this.repository=store.applicationBatches;this.browser=browserManager||new BrowserManager({dataDir,headless,timeout:10000,allowLocalFixtures});this.submitting=new Map();this.activeBrowsers=0;
     this.consent=new SubmissionConsentService({store});
     this.submitService=new ControlledSubmissionService({store,preflight:{evaluate:(id,options)=>this.submitPreflight(id,options)},transport:{allowLocalFixtures,submit:command=>this.transportSubmit(command)}});
     this.telemetry={pagesDetected:0,formsParsed:0,fieldsDetected:0,fieldsAutoResolved:0,fieldsWaitingUser:0,resumeUploadsAttempted:0,resumeUploadsSucceeded:0,readyToSubmit:0,adapterMismatch:0,authRequired:0,captchaEncountered:0,fillFailures:0};
@@ -85,7 +87,9 @@ export class ApplicationBatchService {
       if(!resumed){
         const identity=this.adapter.identify(draft.applicationUrl);if(!identity.canonicalUrl)fail("APPLICATION_TARGET_INVALID");
         if(!this.allowLocalFixtures)await this.adapter.configureSession(session,draft);
-        await session.page.goto(draft.applicationUrl,{waitUntil:"domcontentloaded"});
+        const response=await session.page.goto(draft.applicationUrl,{waitUntil:"domcontentloaded"});
+        if([500,502,503,504].includes(response?.status()))fail("PORTAL_TEMPORARILY_UNAVAILABLE");
+        if([401,403,429].includes(response?.status()))fail(response.status()===429?"PORTAL_RATE_LIMITED":"PORTAL_ACCESS_RESTRICTED");
       }
       if(!this.allowLocalFixtures)this.adapter.validatePageTarget(session.page,draft);
       return session;
@@ -95,7 +99,8 @@ export class ApplicationBatchService {
     const inspected=await this.adapter.inspect(session.page),profile=CandidateKnowledgeBase.fromProfile(await this.profileProvider()),knowledge=CandidateKnowledgeBase.fromFacts(this.store.candidateKnowledge?.applicationFacts?.()||[]);
     if(this.sourceAuth&&/AUTH|LOGIN/.test(inspected.challenge||''))this.sourceAuth.expire('gupy',new URL(draft.applicationUrl).hostname);
     this.store.structuredLogs?.record({category:'APPLICATION_FILL',provider:'gupy',eventCode:'FORM_INSPECTED',correlationId:draft.id,applicationItemId:draft.id,jobId:draft.jobId,resumeVersionId:draft.resumeVersionId,status:inspected.challenge||'PARSED',level:inspected.challenge?'WARN':'INFO',errorCode:inspected.challenge||'',metadata:{fieldCount:inspected.fields.length}});
-    inspected.fields=resolveApplicationFields(inspected.fields,{answers:draft.answers,library:this.store.applicationAnswers,profile,knowledge,resumeVersion:this.selectVersion(draft.jobId,draft.resumeVersionId)});
+    inspected.fields=resolveApplicationFields(inspected.fields,{answers:gupyConfirmedAnswers(this.store,draft),library:this.store.applicationAnswers,profile,knowledge,resumeVersion:this.selectVersion(draft.jobId,draft.resumeVersionId)});
+    if(!inspected.challenge)publishGupyQuestions(this.store,draft,inspected.fields);
     return inspected;
   }
   assessStep(inspected,{final=false}={}){
@@ -148,7 +153,7 @@ export class ApplicationBatchService {
       this.telemetry.resumeUploadsSucceeded+=inspected.audit.filter(a=>a.field==="RESUME.FILE"&&a.status==="FILLED").length;
       finish("FILLED",patch);finish("VALIDATING",{});
       this.telemetry.readyToSubmit++;return finish("READY_TO_SUBMIT",{reason:"",signature:inspected.signature,fields:inspected.fields,flow:inspected.flow,audit:inspected.audit,artifactHash:selected.artifact.contentHash,answerFingerprint:inspected.answerFingerprint,readyAt:now()});
-    }catch(error){this.store.structuredLogs?.record({category:"APPLICATION_FILL",level:"ERROR",eventCode:"DRAFT_PREPARATION_FAILED",provider:"gupy",applicationItemId:draft.id,jobId:draft.jobId,resumeVersionId:draft.resumeVersionId,errorCode:error.code||"GUPY_PREPARATION_FAILED",metadata:{from:cursor.status,to:error.to||"FAILED"}});if(error.code==="DRAFT_STATE_CONFLICT"||error.code==="DRAFT_TRANSITION_INVALID")throw error;return finish(/RESUME|VERSION|EVIDENCE/.test(error.code||"")?"PREPARATION_REQUIRED":/AUTH|LOGIN|CAPTCHA/.test(error.code||"")?"WAITING_USER":"FAILED",{reason:error.code||"GUPY_PREPARATION_FAILED"});}
+    }catch(error){this.store.structuredLogs?.record({category:"APPLICATION_FILL",level:"ERROR",eventCode:"DRAFT_PREPARATION_FAILED",provider:"gupy",applicationItemId:draft.id,jobId:draft.jobId,resumeVersionId:draft.resumeVersionId,errorCode:error.code||"GUPY_PREPARATION_FAILED",metadata:{from:cursor.status,to:error.to||"FAILED"}});if(error.code==="DRAFT_STATE_CONFLICT"||error.code==="DRAFT_TRANSITION_INVALID")throw error;const reason=classifyAutomationFailure(error)==="RETRYABLE"?"PORTAL_TEMPORARILY_UNAVAILABLE":error.code||"GUPY_PREPARATION_FAILED";return finish(/RESUME|VERSION|EVIDENCE/.test(reason)?"PREPARATION_REQUIRED":/AUTH|LOGIN|CAPTCHA/.test(reason)?"WAITING_USER":"FAILED",{reason});}
     finally{if(session)await this.closeSession(session,{hold:!this.browser.headless,status:this.repository.findItem(draft.id).reason||this.repository.findItem(draft.id).status});}
   }
   answer(id,{fieldId,value,saveForFuture=false}){
@@ -167,12 +172,12 @@ export class ApplicationBatchService {
     const current=this.repository.findItem(target),next=current.status==="PREPARING"?current:this.repository.transitionItem(target,"PREPARING",{mode,reason:""});this.worker?.schedule();return next;
   }
   cancel(id){const d=this.repository.findItem(id);if(!d||active.has(d.status)||d.applicationId||terminal.has(d.status))fail("DRAFT_NOT_CANCELLABLE");return this.repository.transitionItem(id,"CANCELLED");}
-  async submit(id,{confirmed=false,idempotencyKey=""}={}){
+  async submit(id,{confirmed=false,idempotencyKey="",authorization={},assertExecutionAllowed}={}){
     if(!this.submissionEnabled)fail("SUBMISSION_DISABLED");if(confirmed!==true)fail("SUBMISSION_EXPLICIT_CONSENT_REQUIRED");
     if(this.submitting.has(id))return this.submitting.get(id);
-    const promise=this.executeSubmit(id,{idempotencyKey});this.submitting.set(id,promise);try{return await promise;}finally{this.submitting.delete(id);}
+    const promise=this.executeSubmit(id,{idempotencyKey,authorization,assertExecutionAllowed});this.submitting.set(id,promise);try{return await promise;}finally{this.submitting.delete(id);}
   }
-  async executeSubmit(id,{idempotencyKey=""}={}){
+  async executeSubmit(id,{idempotencyKey="",authorization={},assertExecutionAllowed}={}){
     let draft=this.repository.findItem(id);if(!draft||draft.status!=="READY_TO_SUBMIT"||this.duplicate(draft))fail("SUBMISSION_NOT_READY_OR_DUPLICATE");
     await this.selected(draft);
     // A draft is not an Application. Materialize it only at explicit final authorization.
@@ -184,8 +189,8 @@ export class ApplicationBatchService {
       draft=this.repository.transitionItem(id,"SUBMITTING",{applicationId},{expectedStatus:draft.status,expectedRevision:draft.stateRevision});return applicationId;
     });
     try{
-      const preflight=await this.submitPreflight(applicationId,{persist:true}),granted=this.consent.grant(applicationId,preflight);
-      const result=await this.submitService.submit({applicationId,consentToken:granted.token,idempotencyKey:idempotencyKey||`gupy-submit:${id}:${randomUUID()}`});
+      const preflight=await this.submitPreflight(applicationId,{persist:true}),granted=this.consent.grant(applicationId,preflight,authorization);
+      const result=await this.submitService.submit({applicationId,consentToken:granted.token,idempotencyKey:idempotencyKey||`gupy-submit:${id}:${randomUUID()}`,assertExecutionAllowed});
       this.repository.transitionItem(id,result.uncertain?"SUBMISSION_UNCERTAIN":result.attempt.status==="SUBMITTED"&&result.receipt?"SUBMITTED":"WAITING_USER",{receiptId:result.receipt?.id||""},{expectedStatus:draft.status,expectedRevision:draft.stateRevision});return result;
     }catch(error){if(error.code==="DRAFT_STATE_CONFLICT"||error.code==="DRAFT_TRANSITION_INVALID")throw error;const attempt=this.store.submissionAttempts.latest(applicationId);this.repository.transitionItem(id,attempt?.phase&&attempt.phase!=="PRE_ACTION"?"SUBMISSION_UNCERTAIN":"WAITING_USER",{reason:error.code||"SUBMISSION_PREFLIGHT_FAILED"},{expectedStatus:draft.status,expectedRevision:draft.stateRevision});throw error;}
   }

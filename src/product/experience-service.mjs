@@ -307,6 +307,7 @@ export class ExperienceService {
         application: application?.application ? {
           id: application.application.id,
           status: application.application.status,
+          manualSent: application.journey?.stage === "SUBMITTED" && application.application.status !== "SUBMITTED",
           updatedAt: application.application.updatedAt,
         } : null,
         feedback: feedback ? {
@@ -349,7 +350,7 @@ export class ExperienceService {
       ),
       submitted = sort(
         applications
-          .filter((item) => item.application.status === "SUBMITTED")
+          .filter((item) => item.application.status === "SUBMITTED" || item.journey?.stage === "SUBMITTED")
           .map((item) => record(item.application.jobId)),
       ),
       active = sort(

@@ -1,11 +1,12 @@
 import {requireLocalJsonMutation} from '../local-mutation-guard.mjs';
+import {isTrustedWebRequest} from '../trusted-web-access.mjs';
 import {sessionProviders} from '../../src/source-connections/session-provider-registry.mjs';
 export function createConnectionsObservabilityRoutes({auth,readiness,observability,readJson,json,sendError}){
   return async(req,res,url)=>{
     if(!/^\/api\/(connections|vaults|observability)(\/|$)/.test(url.pathname))return false;
     try{
       requireLocalJsonMutation(req,url);
-      if(!['localhost','127.0.0.1','[::1]'].includes(url.hostname))throw Object.assign(Error('LOCAL_HOST_REQUIRED'),{code:'LOCAL_HOST_REQUIRED',status:403});
+      if(!['localhost','127.0.0.1','[::1]'].includes(url.hostname)&&!isTrustedWebRequest(req,url))throw Object.assign(Error('LOCAL_HOST_REQUIRED'),{code:'LOCAL_HOST_REQUIRED',status:403});
       if(req.headers['sec-fetch-site']==='cross-site'||req.headers.origin&&req.headers.origin!==url.origin)throw Object.assign(Error('SAME_ORIGIN_REQUIRED'),{code:'SAME_ORIGIN_REQUIRED',status:403});
       if(req.method!=='GET'&&!/^application\/json(?:;|$)/i.test(req.headers['content-type']||''))throw Object.assign(Error('JSON_REQUIRED'),{code:'JSON_REQUIRED',status:415});
       res.setHeader('Cache-Control','no-store');
@@ -20,7 +21,7 @@ export function createConnectionsObservabilityRoutes({auth,readiness,observabili
         if(action==='disconnect')result=await auth.disconnect(id);
         else if(action==='check')result=await auth.check(id);
         else {result=await auth.begin(id,{intent:action==='sync'?'SYNC':'CONNECT',jobId:input.jobId,force:input.force===true});
-          if(id==='gupy'&&result.canLaunch){const ticket=auth.issueTicket(result.id);result.launchUrl=`career-unified-auth://auth?id=${result.id}&ticket=${ticket}&port=${url.port||80}`;}
+          if(id==='gupy'&&result.canLaunch){const ticket=auth.issueTicket(result.id);result.launchUrl=`career-unified-auth://auth?id=${result.id}&ticket=${ticket}&port=${url.port||(url.protocol==='https:'?443:80)}`;}
         }
         if(result.id)res.setHeader('X-Correlation-Id',result.id);json(res,{ok:true,...result});return true;
       }
@@ -29,7 +30,7 @@ export function createConnectionsObservabilityRoutes({auth,readiness,observabili
         const input=await readJson(req),id=vault[1],action=vault[2];let result;
         if(action==='disconnect')result=await auth.disconnect(id);
         else if(action==='check')result=await auth.check(id);
-        else {result=await auth.begin(id,{intent:'CONNECT',force:input.force===true,purpose:action==='create'?'CREATE_ACCOUNT':'LOGIN'});if(result.canLaunch){const ticket=auth.issueTicket(result.id);result.launchUrl=`career-unified-auth://auth?id=${result.id}&ticket=${ticket}&port=${url.port||80}`;}}
+        else {result=await auth.begin(id,{intent:'CONNECT',force:input.force===true,purpose:action==='create'?'CREATE_ACCOUNT':'LOGIN'});if(result.canLaunch){const ticket=auth.issueTicket(result.id);result.launchUrl=`career-unified-auth://auth?id=${result.id}&ticket=${ticket}&port=${url.port||(url.protocol==='https:'?443:80)}`;}}
         if(result.id)res.setHeader('X-Correlation-Id',result.id);json(res,{ok:true,...result});return true;
       }
       const request=url.pathname.match(/^\/api\/connections\/requests\/([^/]+)\/(poll|token)$/);

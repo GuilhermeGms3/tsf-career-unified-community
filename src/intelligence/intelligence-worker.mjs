@@ -5,8 +5,10 @@ export class IntelligenceWorker {
     workerId = `intelligence-worker-${process.pid}`,
     concurrency = 1,
     pollIntervalMs = 1000,
+    claimOptions = {},
   } = {}) {
     this.repository = repository;
+    this.claimOptions = claimOptions;
     this.handlers = handlers;
     this.workerId = workerId;
     this.concurrency = Math.max(1, Number(concurrency));
@@ -43,7 +45,7 @@ export class IntelligenceWorker {
     try {
       while (this.running < this.concurrency) {
         const job = this.repository.claim(
-          `${this.workerId}-${this.running + 1}`,
+          `${this.workerId}-${this.running + 1}`, this.claimOptions,
         );
         if (!job) break;
         this.running++;
@@ -55,7 +57,7 @@ export class IntelligenceWorker {
   }
   async runOne() {
     if (this.running >= this.concurrency) return null;
-    const job = this.repository.claim(`${this.workerId}-${this.running + 1}`);
+    const job = this.repository.claim(`${this.workerId}-${this.running + 1}`, this.claimOptions);
     if (!job) return null;
     this.running++;
     return this.execute(job);

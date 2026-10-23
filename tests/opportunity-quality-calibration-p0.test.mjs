@@ -106,7 +106,7 @@ test("P0 calibration: Search Intent avoids contradiction but never creates evide
 
 test("P0 calibration: positive controls still reach Recommended and Prepare Eligible", () => {
   const evaluate = (overallScore) => evaluateOpportunityDecision({
-    job,
+    job: { ...job, description: "Desenvolvimento e manutenção de APIs e serviços de backend, documentação das integrações, revisão de código e colaboração com a equipe técnica na resolução de incidentes." },
     analysis: { ...analysis, overallScore, matchConfidence: 85, evidenceCoverage: 85 },
     priority: { technicalMatch: overallScore, components: { confidence: 85 } },
     policies: policy,

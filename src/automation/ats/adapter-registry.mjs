@@ -10,6 +10,7 @@ import { WorkdayAdapter } from "./workday/workday-adapter.mjs";
 import {GupyAdapter} from "./gupy/gupy-adapter.mjs";
 import {GUPY_CAPABILITY_TRUTH} from "../../application/gupy-capability-truth.mjs";
 import { assistedAtsAdapterTypes } from "./assisted/assisted-ats-adapters.mjs";
+import { submitHomologation } from "./submit-homologation.mjs";
 
 const assistedFillCapability=Object.freeze({level:"ASSISTED_FILL",implemented:true,canInspect:true,canFill:true,canValidate:true,canSubmit:false,canReceipt:false,authHandoff:true,challengeHandoff:true,label:"Inspeção e preenchimento genéricos; conclusão manual obrigatória"});
 
@@ -20,6 +21,7 @@ export const APPLICATION_ADAPTER_CAPABILITIES=Object.freeze({
   smartrecruiters:Object.freeze({level:"CONTROLLED_SUBMIT",implemented:true,canInspect:true,canFill:true,canValidate:true,canSubmit:true,canReceipt:true,authHandoff:true,challengeHandoff:true,label:"Controlled Submit disponível quando o runtime e todos os gates estiverem habilitados"}),
   workable:Object.freeze({level:"CONTROLLED_SUBMIT",implemented:true,canInspect:true,canFill:true,canValidate:true,canSubmit:true,canReceipt:true,authHandoff:true,challengeHandoff:true,label:"Controlled Submit disponível quando o runtime e todos os gates estiverem habilitados"}),
   generic:assistedFillCapability,
+  empregare:assistedFillCapability,
   iel:assistedFillCapability,
   solides:assistedFillCapability,
   recrutei:assistedFillCapability,
@@ -49,6 +51,8 @@ export class AdapterRegistry {
   get(type){const normalized=String(type||"unknown").toLowerCase(),AssistedAdapter=assistedAtsAdapterTypes[normalized];return normalized==="greenhouse"?new GreenhouseAdapter():normalized==="lever"?new LeverAdapter():normalized==="ashby"?new AshbyAdapter():normalized==="smartrecruiters"?new SmartRecruitersAdapter():normalized==="workable"?new WorkableAdapter():normalized==="nerdin"?new NerdinAdapter():normalized==="teamtailor"?new TeamtailorAdapter():normalized==="workday"?new WorkdayAdapter():normalized==="gupy"?new GupyAdapter():AssistedAdapter?new AssistedAdapter():new GenericAdapter();}
   supports(type){return Object.hasOwn(APPLICATION_ADAPTER_CAPABILITIES,String(type||"unknown").toLowerCase());}
   version(type){return this.get(type).constructor.version;}
-  describe(type){const normalized=String(type||"unknown").toLowerCase();return structuredClone(APPLICATION_ADAPTER_CAPABILITIES[normalized]||APPLICATION_ADAPTER_CAPABILITIES.unknown);}
-  listCapabilities(){return Object.entries(APPLICATION_ADAPTER_CAPABILITIES).map(([atsType,capability])=>({atsType,...structuredClone(capability)}));}
+  // Historical receipt: docs/autoapply-external-homologation-2026-10-15.md.
+  // This does not replace fresh form/session/receipt checks on each application.
+  describe(type,{scenario=""}={}){const normalized=String(type||"unknown").toLowerCase(),homologation=submitHomologation(normalized,this.version(normalized),{scenario});return {...structuredClone(APPLICATION_ADAPTER_CAPABILITIES[normalized]||APPLICATION_ADAPTER_CAPABILITIES.unknown),homologation,externalSubmitVerified:homologation.automaticSubmitEligible};}
+  listCapabilities(){return Object.keys(APPLICATION_ADAPTER_CAPABILITIES).map(atsType=>({atsType,...this.describe(atsType)}));}
 }

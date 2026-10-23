@@ -25,6 +25,10 @@ test("jornadas normais escondem complexidade sem remover controles avançados",a
   assert.match(opportunities,/Search Composer V4\.1/);
   assert.match(opportunities,/Encontrada via/);
   assert.match(autopilot,/data-autopilot-simple/);
+  assert.match(autopilot,/data-toggle-job-automation/);
+  assert.match(autopilot,/Ligar automação/);
+  assert.match(autopilot,/Pausar automação/);
+  assert.match(autopilot,/aria-pressed/);
   assert.match(autopilot,/Configurações avançadas/);
   assert.match(autopilot,/Query Budget avançado/);
   assert.match(autopilot,/data-notification-policy/);

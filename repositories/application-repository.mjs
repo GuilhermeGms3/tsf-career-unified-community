@@ -41,6 +41,11 @@ export class ApplicationRepository extends BaseRepository {
       if (!current) throw new Error("Candidatura nao encontrada.");
       const { from, to } = assertApplicationTransition(current.status, targetStatus);
       if (from === to) return current;
+      if(["SUBMITTING","SUBMISSION_UNCERTAIN"].includes(from)&&!["SUBMITTED","SUBMISSION_UNCERTAIN"].includes(to)){
+        const hasAttempts=this.connection.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='submission_attempts'").get();
+        const attempt=hasAttempts?this.connection.prepare("SELECT phase,failure_class FROM submission_attempts WHERE application_id=? ORDER BY created_at DESC,rowid DESC LIMIT 1").get(applicationId):null;
+        if(attempt&&attempt.phase!=="PRE_ACTION"&&attempt.failure_class!=="RECONCILED_NOT_SUBMITTED")throw new ApplicationStateError("O envio pode ter ocorrido. Reconcilie o resultado antes de cancelar ou permitir nova tentativa.","SUBMISSION_RECONCILIATION_REQUIRED");
+      }
       const now = new Date().toISOString();
       this.connection.prepare("UPDATE applications SET status = ?, applied_at = CASE WHEN ?='SUBMITTED' THEN COALESCE(applied_at,?) ELSE applied_at END, updated_at = ? WHERE id = ?").run(to,to,now,now,applicationId);
       this.appendEvent(applicationId, from, to, metadata, now);

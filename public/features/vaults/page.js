@@ -7,6 +7,7 @@ onRouteChange(()=>{generation++;clearTimeout(timer);});
 const post=(path,body={})=>api(path,{method:'POST',body:JSON.stringify(body)});
 const pending=new Set(['LAUNCH_PENDING','AUTH_IN_PROGRESS','USER_ACTION_REQUIRED','SESSION_VALIDATING']);
 const retryable=new Set(['AUTH_LAUNCH_FAILED','AUTH_FAILED','AUTH_REQUEST_EXPIRED','SESSION_EXPIRED','CANCELLED']);
+const sessionDuration=hours=>Number(hours)%24===0?`${Number(hours)/24} dias`:`${hours} horas`;
 const stateCopy={
   SESSION_ACTIVE:['Sessão ativa','success'],
   LAUNCH_PENDING:['Abrindo navegador','warning'],
@@ -49,7 +50,7 @@ function vaultCard(item){
   return `<article class="vault-card" data-vault="${e(item.id)}" data-status="${e(status)}">
     <header><div><p class="eyebrow">Conta de candidato</p><h2>${e(item.name)}</h2></div>${statePill(status)}</header>
     <p>${e(item.notes||'Sessão usada somente quando uma candidatura nesse portal exigir autenticação.')}</p>
-    <dl><div><dt>Escopo</dt><dd>Uma conta neste portal</dd></div><div><dt>Validade local</dt><dd>${item.sessionHours} horas</dd></div><div><dt>Última verificação</dt><dd>${latest?.verifiedAt?e(formatDateTime(latest.verifiedAt)):'Ainda não verificada'}</dd></div></dl>
+    <dl><div><dt>Escopo</dt><dd>Uma conta neste portal</dd></div><div><dt>Validade local</dt><dd>${e(sessionDuration(item.sessionHours))}</dd></div><div><dt>Última verificação</dt><dd>${latest?.verifiedAt?e(formatDateTime(latest.verifiedAt)):'Ainda não verificada'}</dd></div></dl>
     <div class="vault-actions">
       ${active?`<button class="button" data-vault-action="check" data-provider="${e(item.id)}">Verificar</button><button class="button danger" data-vault-action="disconnect" data-provider="${e(item.id)}">Desconectar</button>`:`<button class="button primary" data-vault-action="connect" data-provider="${e(item.id)}" ${pending.has(status)?'disabled':''}>Entrar</button><button class="button" data-vault-action="create" data-provider="${e(item.id)}" ${pending.has(status)?'disabled':''}>Criar conta</button>`}
     </div>

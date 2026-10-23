@@ -1,6 +1,12 @@
 import { access, stat } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import path from "node:path";
+import { parseNerdinIdentity, validateNerdinSubmissionTarget } from "./ats/nerdin/nerdin-target-policy.mjs";
+
+export function resolveAutomationEntryUrl(value) {
+  const url = validateAutomationUrl(value), identity = parseNerdinIdentity(url);
+  return identity.providerJobId ? validateNerdinSubmissionTarget(url, { expectedIdentity: identity }).url : url;
+}
 
 const allowedExtensions=new Set([".pdf",".docx",".txt"]);
 export async function validateSelectedResume(resume,dataDir){if(!resume?.storedPath)throw Object.assign(new Error("Curriculo selecionado nao possui arquivo."),{code:"RESUME_FILE_MISSING"});const resolved=path.resolve(resume.storedPath);const root=path.resolve(dataDir,"resumes")+path.sep;if(!resolved.startsWith(root))throw Object.assign(new Error("Caminho do curriculo fora da pasta permitida."),{code:"RESUME_PATH_NOT_ALLOWED"});if(!allowedExtensions.has(path.extname(resolved).toLowerCase()))throw Object.assign(new Error("Extensao de curriculo nao permitida."),{code:"RESUME_FILE_NOT_ALLOWED"});await access(resolved);if((await stat(resolved)).size>12*1024*1024)throw Object.assign(new Error("Curriculo excede 12 MB."),{code:"RESUME_FILE_TOO_LARGE"});return resolved;}

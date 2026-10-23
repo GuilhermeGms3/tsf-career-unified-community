@@ -55,13 +55,14 @@ test("projeção agrupa anúncios exatos e preserva as origens", async () => {
   assert.equal(result.length, 1);
   assert.equal(result[0].job.duplicateGroup.count, 2);
   assert.deepEqual(result[0].job.duplicateGroup.providers, ["jobspy"]);
-  assert.deepEqual(result[0].job.duplicateGroup.sources, ["indeed", "jobspy", "linkedin"]);
+  // The freshest representative may change source order by one millisecond.
+  assert.deepEqual([...result[0].job.duplicateGroup.sources].sort(), ["indeed", "jobspy", "linkedin"]);
 });
 
 test("verificação pública persiste disponível, encerrada e inconclusiva", async () => {
   let current = job("verify");
   const store = { jobs: { findById: () => current, upsert: (value) => (current = value) } };
-  const available = new OpportunityAvailabilityService({ store, client: { getText: async () => ({ data: "Vaga aberta", url: current.url, response: { status: 200 } }) } });
+  const available = new OpportunityAvailabilityService({ store, client: { getText: async () => ({ data: `<h1>${current.title}</h1><button>Candidatar</button>`, url: current.url, response: { status: 200 } }) } });
   assert.equal((await available.verify(current.id)).availability.status, "AVAILABLE");
 
   const closed = new OpportunityAvailabilityService({ store, client: { getText: async () => ({ data: "Esta vaga foi encerrada", url: current.url, response: { status: 200 } }) } });

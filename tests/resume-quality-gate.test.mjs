@@ -5,6 +5,16 @@ import {ResumeQualityGate} from "../src/resume/validation/resume-quality-gate.mj
 const gate=new ResumeQualityGate(),job={title:"Analista de Infraestrutura"};
 const good={sections:{summary:"Profissional de infraestrutura com experiência em operação, diagnóstico de incidentes e sustentação de ambientes corporativos.",experience:[{bullets:["Investigou incidentes de infraestrutura e documentou correções para reduzir reincidências operacionais.","Apoiou a sustentação de ambientes corporativos com diagnóstico técnico e comunicação entre equipes."]}]}};
 
+test("resumo compilado exige revisao mesmo quando usa fatos corretos", () => {
+  const resume = structuredClone(good);
+  resume.sections.summary = "Profissional de tecnologia com estudos em Engenharia de Software. Vivência com Linux, Active Directory e Inglês B2. Atuação voltada a infraestrutura.";
+  const result = gate.evaluate({ resume, job });
+  assert.ok(result.warnings.includes("NATURAL_PROSE"));
+  assert.equal(result.autoApplyEligible, false);
+  resume.sections.summary = "Minha experiência em infraestrutura inclui administração de ambientes Linux e monitoramento de servidores corporativos.";
+  assert.ok(gate.evaluate({ resume, job }).warnings.includes("NATURAL_PROSE"));
+});
+
 test("quality gate libera somente currículo coerente para a política de AutoApply",()=>{const result=gate.evaluate({resume:good,job,originalScore:72,tailoredScore:79});assert.equal(result.status,"PASS");assert.equal(result.autoApplyEligible,true);assert.equal(result.blockingReasons.length,0);});
 test("quality gate exige revisão quando a redação soa gerada e publicitária",()=>{const result=gate.evaluate({resume:{...good,sections:{...good.sections,summary:"Profissional de tecnologia que reúne conhecimentos comprovados em suporte, direcionados a operações de TI e para contribuir em novos desafios."}},job,originalScore:72,tailoredScore:79});assert.equal(result.status,"REVIEW_REQUIRED");assert.equal(result.autoApplyEligible,false);assert.ok(result.warnings.includes("NATURAL_PROSE"));});
 test("quality gate bloqueia resumo quebrado, bullets duplicados e regressão",()=>{const result=gate.evaluate({resume:{sections:{summary:"Infraestrutura,Cloud",experience:[{bullets:["Texto duplicado para representar uma atividade profissional relevante.","Texto duplicado para representar uma atividade profissional relevante."]}]}},job,originalScore:80,tailoredScore:70});assert.equal(result.status,"BLOCKED");assert.equal(result.autoApplyEligible,false);assert.ok(result.blockingReasons.includes("SUMMARY_PRESENT"));assert.ok(result.blockingReasons.includes("SUMMARY_FORMAT"));assert.ok(result.blockingReasons.includes("NO_DUPLICATE_BULLETS"));assert.ok(result.blockingReasons.includes("ATS_SCORE_NON_REGRESSION"));});

@@ -1,3 +1,10 @@
+.question-fallback-form > .check {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.question-fallback-form > .check input { flex: 0 0 auto; margin-top: 6px; }
+
 .page-secondary-navigation {
   margin: var(--space-4) 0 var(--space-6);
 }

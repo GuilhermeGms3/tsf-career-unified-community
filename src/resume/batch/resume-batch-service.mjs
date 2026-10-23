@@ -326,6 +326,10 @@ export class ResumeBatchService {
       resume = this.store.resumes.findById(item.finalResumeId),
       analysis = this.store.analyses.findById(item.analysisId),
       profile = await this.profileProvider();
+    if (job?.lifecycleStatus === "CLOSED") {
+      this.store.resumeBatches.transitionItem(item.id, "CANCELLED", { failureCode: "JOB_CLOSED", failureMessage: "Vaga encerrada no portal; currículo não será preparado." });
+      return;
+    }
     const runId = `batch-tailoring-${createHash("sha256").update(`${item.id}:${item.finalResumeId}:${item.analysisId}`).digest("hex")}`;
     const existing = this.store.resumeTailoring.findRun(runId);
     if (existing) {

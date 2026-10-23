@@ -85,7 +85,7 @@ test("schema atual preserva document engine e archetypes", async () => {
       f.store.database.connection
         .prepare("SELECT MAX(version) version FROM schema_migrations")
         .get().version,
-      51,
+      58,
     );
     for (const table of [
       "resume_versions",
@@ -373,7 +373,7 @@ test("ApplicationPlanner persiste resume_version_id aprovado exato", async () =>
       unknownRequirements: [],
       algorithmVersion: "ats-matcher-v2",
       matcherVersion: "ats-matcher-v2",
-      scoringModelVersion: "confidence-calibrated-v1",
+      scoringModelVersion: "confidence-calibrated-v2",
       requirementExtractorVersion: "requirements-v3",
       createdAt: now,
       updatedAt: now,
@@ -400,6 +400,21 @@ test("ApplicationPlanner persiste resume_version_id aprovado exato", async () =>
   } finally {
     await f.close();
   }
+});
+
+test("ResumeService direciona cabeçalho somente na nova versão específica", async () => {
+  const f = await fixture();
+  try {
+    seedResume(f.store);
+    const timestamp = new Date().toISOString();
+    f.store.jobs.upsert({ id: "headline-job", title: "Analista de Infraestrutura Júnior", company: "Empresa", url: "https://example.test/job", description: "Infraestrutura", createdAt: timestamp, updatedAt: timestamp });
+    const service = new ResumeService({ store: f.store, dataDir: f.dataDir, profileProvider: async () => profile });
+    const general = await service.prepare({ resumeId: "resume-1" });
+    const targeted = await service.prepare({ resumeId: "resume-1", jobId: "headline-job" });
+    assert.equal(targeted.resumeSpec.candidate.headline, "Infraestrutura de TI");
+    assert.equal(f.store.resumeVersions.findById(general.id).resumeSpec.candidate.headline, general.resumeSpec.candidate.headline);
+    assert.equal(f.store.resumes.findById("resume-1").focus, "Suporte");
+  } finally { await f.close(); }
 });
 
 test("ResumeService exige review e preserva LaTeX quando compilador falta", async () => {

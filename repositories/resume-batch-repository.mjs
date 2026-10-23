@@ -218,15 +218,15 @@ export class ResumeBatchRepository {
     return this.findItem(itemId);
   }
 
-  claim(status, workerId) {
+  claim(status, workerId, {since=""} = {}) {
     if (!WORK_STATES.has(status))
       throw new Error("Estado de trabalho inválido.");
     return this.database.transaction(() => {
       const row = this.connection
         .prepare(
-          "SELECT id FROM resume_batch_items WHERE status=? AND locked_at IS NULL ORDER BY created_at,rowid LIMIT 1",
+          "SELECT id FROM resume_batch_items WHERE status=? AND locked_at IS NULL AND updated_at>=? ORDER BY created_at,rowid LIMIT 1",
         )
-        .get(status);
+        .get(status,since);
       if (!row) return null;
       const timestamp = now(),
         changed = this.connection

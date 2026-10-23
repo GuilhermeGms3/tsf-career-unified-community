@@ -1,4 +1,4 @@
-const METADATA_ALLOWLIST=new Set(["verificationMethod","confirmationKind","providerStatus","fixtureId","adapterVersion","jobId"]);
+const METADATA_ALLOWLIST=new Set(["verificationMethod","confirmationKind","providerStatus","fixtureId","adapterVersion","jobId","screenshotSha256"]);
 const LOOPBACK_HOSTS=new Set(["127.0.0.1","localhost","::1","[::1]"]);
 
 export function sanitizeConfirmationUrl(value,{allowLocalHttp=false}={}){

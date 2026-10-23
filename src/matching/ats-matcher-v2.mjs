@@ -5,6 +5,7 @@ import { evaluateEligibility } from "./eligibility-engine.mjs";
 import { extractJobRequirements } from "./job-requirement-extractor.mjs";
 import { matchRequirements } from "./matching-engine.mjs";
 import { evaluateResumeParseability } from "./resume-parseability.mjs";
+import { jobInformationQuality } from "./job-information-quality.mjs";
 import {
   calculateDimensionScores,
   calculateEvidenceQuality,
@@ -35,10 +36,22 @@ export function runAtsMatcherV2({
   const dimensions = calculateDimensionScores(items, resumeParseability);
   const knownEvidenceMatch = calculateOverallScore(dimensions);
   const evidenceQuality = calculateEvidenceQuality(items);
+  const informationQuality = jobInformationQuality(job);
+  // Coverage describes known requirements, not completeness of the vacancy.
+  if (!informationQuality.sufficient) {
+    evidenceQuality.matchConfidence = Math.round(evidenceQuality.matchConfidence * 0.35);
+    evidenceQuality.confidenceBand = "LOW";
+  }
   const calibration = calibrateMatchScore(knownEvidenceMatch,evidenceQuality);
+  if (!informationQuality.sufficient) calibration.calibratedMatchScore = Math.min(59, calibration.calibratedMatchScore);
   const overallScore = calibration.calibratedMatchScore;
+  dimensions.jobInformation = informationQuality;
   dimensions.evidenceQuality = {...evidenceQuality,...calibration,knownEvidenceMatch,scoringModelVersion:CURRENT_SCORING_MODEL_VERSION};
   const eligibilityResult = evaluateEligibility(items);
+  if (!informationQuality.sufficient) {
+    eligibilityResult.warnings.push(informationQuality.message);
+    if (eligibilityResult.eligibility !== "NOT_ELIGIBLE") eligibilityResult.eligibility = "REVIEW_REQUIRED";
+  }
   const legacy = legacyLists(items);
   const suggestions = [
     ...eligibilityResult.warnings,

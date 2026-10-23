@@ -97,7 +97,7 @@ test("fresh and 27-to-29 upgrade preserve history, FK links, uniqueness and subm
     database.connection.prepare("INSERT INTO application_batch_runs VALUES('batch','batch-key','OFF','t')").run();database.connection.prepare("INSERT INTO application_batch_items VALUES('item','batch','old')").run();database.close();
     database=await new HubDatabase(dbPath).initialize();const repo=new ApplicationBatchRepository(database.connection,database);assert.equal(repo.findItem("old").attemptNo,1);assert.equal(repo.findItem("old").canonicalIdentityKey,historicalKey);assert.equal(repo.getBatch("batch").items[0].status,"CANCELLED");assert.equal(repo.createDraft(input).attemptNo,2);
     const d=repo.createDraft(input);assert.equal(repo.createDraft(input).id,d.id);ready(repo,d.id);repo.transitionItem(d.id,"SUBMITTING");repo.transitionItem(d.id,"SUBMITTED");assert.equal(repo.createDraft(input).id,d.id);assert.equal(database.connection.prepare("PRAGMA integrity_check").get().integrity_check,"ok");assert.equal(database.connection.prepare("PRAGMA foreign_key_check").all().length,0);
-    assert.equal(database.connection.prepare("SELECT MAX(version) version FROM schema_migrations").get().version,51);
+    assert.equal(database.connection.prepare("SELECT MAX(version) version FROM schema_migrations").get().version,58);
     const fresh=await new HubDatabase(":memory:").initialize();try{assert.equal(fresh.connection.prepare("PRAGMA integrity_check").get().integrity_check,"ok");assert.equal(fresh.connection.prepare("PRAGMA foreign_key_check").all().length,0);}finally{fresh.close();}
   }finally{database?.close();await rm(dir,{recursive:true,force:true});}
 });

@@ -12,6 +12,7 @@ import {ProviderRegistry} from "../src/discovery/provider-registry.mjs";
 import {ProviderSetupCatalog,providerSetupCatalog} from "../src/discovery/provider-setup-catalog.mjs";
 import {signCareerWebhook,verifyCareerWebhook} from "../src/integrations/career-webhook-contract.mjs";
 import {WebhookDispatcher} from "../src/integrations/webhook-dispatcher.mjs";
+import {summarizeJobHuntRun} from "../server/routes/autopilot-routes.mjs";
 import {
   CURRENT_MATCHER_VERSION,
   CURRENT_REQUIREMENT_EXTRACTOR_VERSION,
@@ -22,6 +23,14 @@ async function fixture(){const dir=await mkdtemp(path.join(os.tmpdir(),"career-a
 const createdAt="2026-08-14T12:00:00.000Z";
 
 test("migration 009 cria persistencia sem segredos",async()=>{const f=await fixture();try{const tables=f.store.database.connection.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(row=>row.name);for(const table of ["job_hunt_profiles","job_hunt_runs","job_alerts","provider_configurations","provider_health_history","automation_runs","notification_deliveries"])assert.ok(tables.includes(table));const sql=await readFile(new URL("../db/migrations/009_automation_job_hunt_and_source_setup.sql",import.meta.url),"utf8");assert.doesNotMatch(sql,/password|secret|token_value/i);}finally{await f.close();}});
+
+test("resumo de execução omite relatórios pesados sem perder métricas",()=>{const summary=summarizeJobHuntRun({id:"run-1",status:"COMPLETED",discoveredCount:12,report:{jobs:Array.from({length:100},()=>({description:"grande"}))},discoveryRunIds:["discovery-1"]});assert.deepEqual(summary,{id:"run-1",status:"COMPLETED",discoveredCount:12});});
+
+test("inicialização recupera automação abandonada como interrompida",async()=>{const f=await fixture();try{const run=f.store.automationRuns.start("TEST","aggregate-1");assert.equal(f.store.automationRuns.recover(),1);const recovered=f.store.automationRuns.findById(run.id);assert.equal(recovered.status,"FAILED");assert.equal(recovered.stage,"INTERRUPTED");assert.equal(recovered.errorCode,"PROCESS_INTERRUPTED");assert.ok(recovered.completedAt);}finally{await f.close();}});
+
+test("event bus mantém listeners sem acumular outbox desabilitado",async()=>{const f=await fixture();try{let received=false;const bus=new EventBus({outbox:f.store.outbox,shouldPersist:()=>false});bus.on("JOB_UPDATED",()=>{received=true;});const event=bus.emit("JOB_UPDATED",{jobId:"job-1"});assert.equal(received,true);assert.equal(f.store.outbox.findById(event.id),null);}finally{await f.close();}});
+
+test("outbox desabilitado encerra backlog sem apagar histórico",async()=>{const f=await fixture();try{const event=new EventBus({outbox:f.store.outbox}).emit("JOB_UPDATED",{jobId:"job-1"});assert.equal(f.store.outbox.failPending(),1);assert.equal(f.store.outbox.findById(event.id).status,"FAILED");assert.equal(f.store.outbox.findById(event.id).lastErrorCode,"INTEGRATION_DISABLED");}finally{await f.close();}});
 
 test("Evolution usa porta local não conflitante e não retém payload bruto no Docker",async()=>{const compose=await readFile(new URL("../compose.yaml",import.meta.url),"utf8"),example=await readFile(new URL("../.env.example",import.meta.url),"utf8");assert.match(compose,/127\.0\.0\.1:\$\{EVOLUTION_HOST_PORT:-8081\}:8080/);assert.match(compose,/EVOLUTION_INTERNAL_URL: http:\/\/evolution-api:8080/);assert.match(compose,/evolution-api:[\s\S]*?logging:\s*\n\s*driver: "none"/);assert.match(example,/EVOLUTION_MANAGER_URL=http:\/\/127\.0\.0\.1:8081\/manager/);});
 

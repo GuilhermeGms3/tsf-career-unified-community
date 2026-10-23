@@ -137,6 +137,25 @@ test("ProgramaThor preserva ID estável, remoto e escopo Brasil declarado", asyn
   assert.equal(result.jobs[0].metadata.remoteScope, "Brazil");
 });
 
+test("ProgramaThor prioriza vagas recentes no sitemap histórico", async () => {
+  const older = "https://programathor.com.br/jobs/120-desenvolvedor-junior";
+  const newer = "https://programathor.com.br/jobs/99120-desenvolvedor-junior";
+  const calls = [];
+  const provider = new ProgramaThorProvider({
+    client: {
+      async getText(url) {
+        calls.push(String(url));
+        if (String(url).endsWith("sitemap.xml"))
+          return { data: `<urlset><url><loc>${older}</loc></url><url><loc>${newer}</loc></url></urlset>` };
+        return { data: jsonLdPage(jobPosting({ title: "Desenvolvedor Junior" })) };
+      },
+    },
+  });
+  const result = await provider.search({ query: "desenvolvedor", limit: 1 });
+  assert.equal(result.jobs.length, 1);
+  assert.equal(calls[1], newer);
+});
+
 test("Recrutei respeita sitemap e não usa API nem query bloqueada", async () => {
   const sitemapUrl = "https://empregos.recrutei.com.br/sitemap-vagas-1.xml";
   const jobUrl = "https://empregos.recrutei.com.br/vaga/empresa/155283-engenheiro-de-ia-jr";
@@ -271,8 +290,10 @@ test("Sólides usa busca pública limitada e normaliza campos ricos", async () =
         requested = { url: String(url), options };
         return {
           data: {
-            data: {
-              data: [
+            currentPage: 1,
+            totalPages: 1,
+            count: 1,
+            data: [
                 {
                   id: 908357,
                   slug: "desenvolvedor-mobile-cianorte-pr",
@@ -280,28 +301,96 @@ test("Sólides usa busca pública limitada e normaliza campos ricos", async () =
                   companyName: "Academia Force One",
                   description: "<p>Aplicativos e APIs.</p>",
                   city: "Cianorte",
-                  state: "PR",
+                  state: { name: "Paraná", code: "PR" },
                   createdAt: "2026-08-21",
                   homeOffice: false,
                   seniority: [{ name: "Junior" }],
-                  recruitmentContractType: { name: "CLT" },
+                  recruitmentContractType: [{ name: "CLT" }],
+                  jobType: "hibrido",
                   occupationAreas: [{ name: "Tecnologia" }],
                   education: [{ name: "Graduação" }],
                   salary: { negotiable: true },
                 },
-              ],
-            },
+            ],
           },
         };
       },
     },
   });
   const result = await provider.search({ query: "Desenvolvedor", location: "Brasil", limit: 2 });
+  assert.equal(new URL(requested.url).origin, "https://vagas.solides.com.br");
+  assert.equal(new URL(requested.url).pathname, "/api/vacancies");
+  assert.equal(new URL(requested.url).searchParams.get("take"), "14");
+  assert.equal(new URL(requested.url).searchParams.has("locations"), false);
   assert.match(requested.url, /title=Desenvolvedor/);
   assert.equal(requested.options.headers.origin, "https://vagas.solides.com.br");
   assert.equal(result.jobs[0].providerJobId, "908357");
   assert.equal(result.jobs[0].metadata.occupationAreas[0], "Tecnologia");
-  assert.equal(result.jobs[0].applicationUrl.includes("vagas.solides.com.br/vaga/908357"), true);
+  assert.equal(result.jobs[0].applicationUrl, "https://vagas.solides.com.br/vaga/908357");
+  assert.equal(result.jobs[0].state, "PR");
+  assert.equal(result.jobs[0].workModel, "HYBRID");
+  assert.equal(result.jobs[0].employmentType, "CLT");
+});
+
+test("Sólides verifica a busca real no healthcheck e rejeita schema inválido", async () => {
+  const calls = [];
+  const provider = new SolidesProvider({ client: { async getJson(url, options) {
+    calls.push({ url: new URL(url), options });
+    return { data: { data: [], count: 0, currentPage: 1, totalPages: 0 } };
+  } } });
+  assert.equal((await provider.health()).status, "HEALTHY");
+  assert.equal(calls[0].url.pathname, "/api/vacancies");
+  assert.equal(calls[0].url.searchParams.get("take"), "1");
+  assert.equal(calls[0].options.headers.authorization, undefined);
+  provider.client.getJson = async () => ({ data: { message: "Unexpected response" } });
+  await assert.rejects(provider.health(), error => error.code === "SOLIDES_INVALID_RESPONSE");
+  await assert.rejects(provider.search(), error => error.code === "SOLIDES_INVALID_RESPONSE");
+});
+
+test("Sólides pagina sem duplicar e envia geografia ao portal", async () => {
+  const pages = [];
+  const provider = new SolidesProvider({ client: { async getJson(url) {
+    const request = new URL(url), page = Number(request.searchParams.get("page"));
+    pages.push(page);
+    assert.equal(request.searchParams.get("locations"), "Brasília, DF");
+    const rows = Array.from({ length: 14 }, (_, index) => ({
+      id: page === 1 ? index + 1 : index + 14,
+      title: "Analista de Suporte", companyName: "Fixture", city: { name: "Brasília" },
+      state: { name: "Distrito Federal", code: "DF" }, jobType: "presencial",
+    }));
+    return { data: { data: rows, count: 27, currentPage: page, totalPages: 2 } };
+  } } });
+  const result = await provider.search({ query: "Suporte", location: "Brasília, DF", limit: 20 });
+  assert.deepEqual(pages, [1, 2]);
+  assert.equal(result.jobs.length, 20);
+  assert.equal(new Set(result.jobs.map(job => job.providerJobId)).size, 20);
+  assert.equal(result.jobs[0].location, "Brasília, DF");
+  assert.equal(result.jobs[0].workModel, "ONSITE");
+});
+
+test("Sólides limita paginação e não confunde menção a remoto com modalidade", async () => {
+  let calls = 0;
+  const provider = new SolidesProvider({ client: { async getJson() {
+    calls++;
+    return { data: { data: Array.from({ length: 14 }, (_, index) => ({ id: calls * 100 + index, title: "Contador", occupationAreas: [] })), totalPages: 100 } };
+  } } });
+  assert.equal((await provider.search({ query: "Desenvolvedor", limit: 50 })).jobs.length, 0);
+  assert.equal(calls, 4);
+  const onsite = provider.normalize({ id: 1, title: "Suporte", description: "Atendimento remoto", jobType: "presencial" });
+  assert.equal(onsite.remote, false);
+  const remote = provider.normalize({ id: 2, title: "Suporte", jobType: "remoto", homeOffice: false });
+  assert.equal(remote.remote, true);
+  assert.equal(remote.workModel, "REMOTE");
+  assert.equal(provider.normalize({ id: 3, title: "Suporte", jobType: "constructor" }).workModel, "");
+});
+
+test("Sólides rejeita redirects quebrados e preserva destino externo válido", () => {
+  const provider = new SolidesProvider({ client: {} });
+  for (const redirectLink of ["https://empresa./vacancies/12345", "https:///vacancies/12345", "http://localhost/apply", "https://user:secret@example.test/apply", "javascript:alert(1)"])
+    assert.equal(provider.normalize({ id: 12345, title: "Dev", redirectLink }).applicationUrl, "https://vagas.solides.com.br/vaga/12345");
+  const redirectUrl = "https://empresa.rhgestor.com.br/vagas/detalhes/abc";
+  assert.equal(provider.normalize({ id: 12345, title: "Dev", redirectLink: "https://empresa./vacancies/12345", publishers: { rhgestor: { redirectUrl } } }).applicationUrl, redirectUrl);
+  assert.equal(provider.normalize({ id: 12345, title: "Dev", redirectLink: "https://jobs.lever.co/company/job" }).applicationUrl, "https://jobs.lever.co/company/job");
 });
 
 test("registry e Source Center expõem seis fontes READY e Eureca manual", async () => {

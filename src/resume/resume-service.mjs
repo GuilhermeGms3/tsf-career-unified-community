@@ -11,6 +11,7 @@ import { PdfValidator } from "./validation/pdf-validator.mjs";
 import { AtsDocumentValidator } from "./validation/ats-document-validator.mjs";
 import { assertTailoringApprovable } from "../intelligence/tasks/resume-tailor.mjs";
 import { buildResumeSourceEvidence } from "./resume-source-evidence.mjs";
+import { withTargetedResumeHeadline } from "./resume-target-headline.mjs";
 
 export class ResumeService {
   constructor({
@@ -122,14 +123,14 @@ export class ResumeService {
         this.store.resumeArchetypes?.find(archetypeId) ||
         this.store.resumeArchetypes?.find("GENERAL") ||
         null,
-      spec = this.builder.build({
+      spec = withTargetedResumeHeadline(this.builder.build({
         profile,
         resume,
         changeset: tailoring,
         evidence,
         language: selection.language,
         archetype,
-      }),
+      }), job),
       validation = this.validator.validateSpec(spec, {
         evidence,
         requireEvidence: this.policy.policy.requireEvidenceValidation,

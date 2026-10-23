@@ -1,14 +1,9 @@
 import { randomUUID } from "node:crypto";
+import { jobInformationQuality } from "../../matching/job-information-quality.mjs";
+import { evaluateApplicationRoutingPolicy, resumeAtsScore, tailoringAllowsAutoApply } from "../../application/application-routing-policy.mjs";
 
 const keyFor = (jobId, resumeVersionId) => `${jobId}:${resumeVersionId}`;
-const atsScoreOf = (version = {}) => {
-  const value = Number(
-    version.atsAfter?.overallScore ??
-      version.atsAfter?.score ??
-      version.atsAfter?.comparison?.afterScore,
-  );
-  return Number.isFinite(value) ? value : null;
-};
+const atsScoreOf = resumeAtsScore;
 const approvedBase = (store) => {
   const resumeId = store.database?.getMetadata?.("default_resume_id", "") || "";
   const resume = resumeId ? store.resumes.findById(resumeId) : null;
@@ -36,16 +31,16 @@ export class ResumeApprovalDispatcher {
     this.inFlight = new Map();
   }
 
-  dispatch({ jobId = "", resumeVersionId = "" } = {}) {
+  dispatch({ jobId = "", resumeVersionId = "", allowWhatsApp = true, reviewOnly = false } = {}) {
     const key = keyFor(jobId, resumeVersionId);
     if (this.inFlight.has(key)) return this.inFlight.get(key);
-    const work = this.execute({ jobId, resumeVersionId })
+    const work = this.execute({ jobId, resumeVersionId, allowWhatsApp, reviewOnly })
       .finally(() => this.inFlight.delete(key));
     this.inFlight.set(key, work);
     return work;
   }
 
-  async execute({ jobId, resumeVersionId }) {
+  async execute({ jobId, resumeVersionId, allowWhatsApp = true, reviewOnly = false }) {
     const version = this.store.resumeVersions.findById(String(resumeVersionId || ""));
     if (!version?.jobId)
       return { sent: false, status: "SKIPPED", reason: "JOB_SPECIFIC_VERSION_REQUIRED" };
@@ -60,6 +55,8 @@ export class ResumeApprovalDispatcher {
     const job = this.store.jobs.findById(version.jobId);
     if (!job)
       return { sent: false, status: "SKIPPED", reason: "JOB_NOT_FOUND" };
+    if (job.lifecycleStatus === "CLOSED" || job.availability?.status === "CLOSED")
+      return { handled: true, sent: false, status: "SKIPPED", reason: "JOB_CLOSED" };
     const submitted = this.store.applications.all().find((item) =>
       item.jobId === job.id &&
       item.resumeVersionId === version.id &&
@@ -76,18 +73,14 @@ export class ResumeApprovalDispatcher {
     if (!artifact || artifact.status !== "READY")
       return { sent: false, status: "SKIPPED", reason: "READY_PDF_REQUIRED" };
 
-    const policy = this.policyProvider(), atsScore = atsScoreOf(version),tailoring=version.tailoringRunId?this.store.resumeTailoring?.findRun?.(version.tailoringRunId):null,quality=tailoring?.quality||null,qualityAllowsAutoApply=tailoring?.evidenceStatus==="VALID"&&quality?.status==="PASS"&&quality?.autoApplyEligible===true;
-    if (
-      policy?.enabled === true &&
-      qualityAllowsAutoApply &&
-      atsScore !== null &&
-      atsScore >= Number(policy.minimumAtsScore)
-    )
-      return this.dispatchAutoApply({ job, version, policy, atsScore });
+    const policy=this.policyProvider(),atsScore=atsScoreOf(version),tailoring=version.tailoringRunId?this.store.resumeTailoring?.findRun?.(version.tailoringRunId):null;
+    if(reviewOnly)return this.queueForReview({job,version,atsScore});
+    const routing=evaluateApplicationRoutingPolicy({score:atsScore,policy,qualityApproved:tailoringAllowsAutoApply(tailoring),descriptionSufficient:jobInformationQuality(job).sufficient});
+    if(routing.route==="AUTO_APPLY")return this.dispatchAutoApply({job,version,policy,atsScore});
+    if(routing.route==="PLATFORM_ANALYSIS")return {...this.queueForReview({job,version,atsScore}),reason:routing.reasons[0]||"ROUTING_REVIEW_REQUIRED"};
 
-    if (policy?.enabled === true && qualityAllowsAutoApply && atsScore !== null &&
-      (atsScore < Number(policy.whatsappMinimumAtsScore) || atsScore > Number(policy.whatsappMaximumAtsScore)))
-      return this.queueForReview({ job, version, atsScore });
+    if (!allowWhatsApp)
+      return { handled: false, sent: false, status: "WHATSAPP_DEFERRED", atsScore };
 
     const prepared = this.approvalGateway.prepare({
       jobId: job.id,

@@ -21,7 +21,7 @@ const analysis = (overrides = {}) => ({
   analysisStatus: "CURRENT",
   algorithmVersion: "ats-matcher-v2",
   matcherVersion: "ats-matcher-v2",
-  scoringModelVersion: "confidence-calibrated-v1",
+  scoringModelVersion: "confidence-calibrated-v2",
   requirementExtractorVersion: "requirements-v3",
   calibratedMatchScore: 76,
   hardRequirementsScore: 90,

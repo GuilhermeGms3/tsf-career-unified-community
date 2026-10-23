@@ -84,7 +84,7 @@ export async function renderOpportunities({ root }) {
       needsAutomation
         ? Promise.all([
             api("/api/job-hunt/profiles", { cache: false }),
-            api("/api/job-hunt/runs?limit=20", { cache: false }),
+            api("/api/job-hunt/runs?limit=20&detail=summary", { cache: false }),
           ])
             .then(([profileData, runData]) => ({
               profiles: profileData.profiles || [],
@@ -188,6 +188,17 @@ export async function renderOpportunities({ root }) {
   bindOpportunityListActions(root, () => renderOpportunities({ root }));
   bindSearchComposer(root);
   bindMassHuntPanel(root);
+  root.querySelectorAll("[data-hunt-source]").forEach(button => button.addEventListener("click", async () => {
+    const status = button.closest("[data-source-recovery]").querySelector('[role="status"]');
+    button.disabled = true;
+    try {
+      const result = await api(`/api/job-hunt/runs/${encodeURIComponent(button.dataset.runId)}/source`, { method: "POST", body: JSON.stringify({ source: button.dataset.huntSource }) });
+      localStorage.setItem(MASS_HUNT_RUN_KEY, result.runId);
+      status.textContent = result.reused ? "Busca já em andamento; radar reaberto." : "Busca direcionada iniciada, sem gerar currículos ou candidaturas.";
+      root.__openMassHunt?.(result.runId);
+    } catch (error) { status.textContent = error.message; }
+    finally { button.disabled = false; }
+  }));
   bindAvailabilityVerification(root, activeVerification);
   bindBatchSelection(root, opportunities, section);
 }
@@ -743,7 +754,7 @@ function bindMassHuntPanel(root) {
   const restore = async () => {
     hide();
     try {
-      const active = await api("/api/job-hunt/runs?status=RUNNING&limit=1", { cache: false });
+      const active = await api("/api/job-hunt/runs?status=RUNNING&limit=1&detail=summary", { cache: false });
       const runId = active.runs?.[0]?.id || "";
       if (runId) attach(runId);
       else localStorage.removeItem(MASS_HUNT_RUN_KEY);
@@ -910,18 +921,28 @@ function massHuntHistoryMarkup(runs = []) {
   if (!runs.length) return `<section class="operation-history"><div class="section-heading"><div><p class="eyebrow">Histórico do Mass Hunt</p><h2>Rodadas de busca</h2><p>As próximas execuções aparecerão aqui com o funil completo.</p></div></div></section>`;
   return `<section class="operation-history" aria-labelledby="mass-hunt-history-title"><div class="section-heading"><div><p class="eyebrow">Histórico do Mass Hunt</p><h2 id="mass-hunt-history-title">Rodadas de busca</h2><p>Descobertas, duplicatas, descartes, fontes e resultado final de cada rodada.</p></div>${pill(`${runs.length} rodada(s)`, "info")}</div><div class="operation-run-list">${runs.slice(0, 12).map((run) => {
     const funnel = run.report?.funnel || {},
-      sources = (run.report?.sourceReports || []).filter((item) => item.called || item.status === "CONSULTED"),
+      sources = (run.sourceRecovery || run.report?.sourceReports || []).filter((item) => item.called || item.status === "CONSULTED"),
       stale = Number(funnel.stale || 0),
       closed = Number(run.closedCount || funnel.closed || 0),
       relevant = Number(funnel.relevantOpportunities ?? run.matchedCount ?? 0),
       tone = run.status === "COMPLETED" ? "success" : run.status === "RUNNING" ? "attention" : run.status === "FAILED" ? "critical" : "neutral";
     return `<article class="operation-run"><header><div><strong>${escapeHtml(formatDate(run.startedAt, { dateStyle: "medium", timeStyle: "short" }))}</strong><small>${run.completedAt ? `Terminou ${escapeHtml(formatDate(run.completedAt, { dateStyle: "short", timeStyle: "short" }))}` : "Em execução agora"}</small></div>${pill(statusLabel(run.status), tone)}</header><div class="operation-run-metrics"><span><strong>${run.rawCount || run.discoveredCount || 0}</strong> encontradas</span><span><strong>${run.canonicalCount || 0}</strong> únicas</span><span><strong>${run.duplicateCount || 0}</strong> duplicadas</span><span><strong>${relevant}</strong> relevantes</span><span><strong>${stale}</strong> antigas filtradas</span><span><strong>${closed}</strong> encerradas</span></div><footer><span>${sources.length ? `${sources.length} fonte(s): ${escapeHtml(sources.slice(0, 5).map((item) => item.provider).join(", "))}${sources.length > 5 ? "…" : ""}` : "Nenhuma fonte confirmou consulta"}</span>${run.errorCode ? `<b>${escapeHtml(statusLabel(run.errorCode))}</b>` : ""}</footer></article>`;
-  }).join("")}</div></section>`;
+  }).join("")}</div>${runs.slice(0, 6).map(sourceRecoveryMarkup).join("")}</section>`;
 }
 
 function availabilityHistoryMarkup(runs = []) {
   if (!runs.length) return "";
   return `<section class="operation-history" aria-labelledby="availability-history-title"><div class="section-heading"><div><p class="eyebrow">Disponibilidade</p><h2 id="availability-history-title">Verificações dos anúncios</h2><p>Somente uma resposta explícita do portal marca uma vaga como encerrada.</p></div></div><div class="operation-run-list compact">${runs.slice(0, 8).map((run) => `<article class="operation-run"><header><div><strong>${escapeHtml(formatDate(run.startedAt, { dateStyle: "medium", timeStyle: "short" }))}</strong><small>${run.status === "RUNNING" ? "Verificação em andamento" : `${run.verificationChecked || 0} anúncio(s) consultado(s)`}</small></div>${pill(statusLabel(run.status), run.status === "COMPLETED" ? "success" : run.status === "RUNNING" ? "attention" : "neutral")}</header><div class="operation-run-metrics availability"><span><strong>${run.availableCount || 0}</strong> ativas</span><span><strong>${run.closedCount || 0}</strong> encerradas</span><span><strong>${run.inconclusiveCount || 0}</strong> inconclusivas</span><span><strong>${run.remainingCount || 0}</strong> aguardando</span></div></article>`).join("")}</div></section>`;
+}
+
+function sourceRecoveryMarkup(run) {
+  if (run.status === "RUNNING") return "";
+  const sources = (run.sourceRecovery || run.report?.sourceReports || []).flatMap(report => report.provider === "jobspy"
+    ? (report.sites || []).map(site => ({ ...site, provider: site.site || site.source }))
+    : [report]);
+  const unique = [...new Map(sources.filter(source => source.provider).map(source => [source.provider, source])).values()];
+  if (!unique.length) return "";
+  return `<section data-source-recovery class="content-card"><h3>Buscar novamente por portal</h3><p class="muted">Rodada de ${escapeHtml(formatDate(run.startedAt))}</p><div class="compact-record-list">${unique.map(source => `<article><strong>${escapeHtml(source.provider)}</strong> <span class="muted">${escapeHtml(statusLabel(source.status))}</span>${source.recovery?.message ? `<p>${escapeHtml(source.recovery.message)}</p>` : ""}${source.skippedRequests ? `<small>${source.skippedRequests} consultas adiadas após falhas repetidas.</small>` : ""}<button class="button" type="button" data-hunt-source="${escapeHtml(source.provider)}" data-run-id="${escapeHtml(run.id)}">${icon("search")} Buscar só ${escapeHtml(source.provider)}</button></article>`).join("")}</div><p role="status" aria-live="polite"></p></section>`;
 }
 function opportunityEmpty() {
   return `<div class="empty-inline"><h2>Nenhuma oportunidade encontrada</h2><p>Faça uma busca manual ou configure o Autopilot. Os resultados descobertos serão persistidos automaticamente.</p></div>`;
@@ -945,6 +966,8 @@ function analysisConfidenceBand(analysis = {}, priority = {}) {
 }
 function evidenceCoverageWarning(analysis = {}) {
   analysis ||= {};
+  if ((analysis.jobInformation || analysis.dimensions?.jobInformation)?.sufficient === false)
+    return '<div class="partial-banner" role="status"><strong>Descrição incompleta</strong><span>A nota é provisória. Atualize os detalhes da vaga antes de autorizar envio automático.</span></div>';
   const coverage = Number(analysis.evidenceCoverage);
   if (!Number.isFinite(coverage) || coverage >= 50) return "";
   return `<div class="partial-banner" role="status"><strong>Cobertura limitada</strong><span>Só conseguimos avaliar ${Math.round(coverage)}% dos requisitos desta vaga. A compatibilidade estimada tem baixa confiança.</span></div>`;
@@ -1269,7 +1292,9 @@ function renderEvidenceGaps(gaps = []) {
 }
 function workspaceStatus(workspace) {
   const current=workspace.freshness?.current;
-  return `<section class="status-strip"><div><span class="status-symbol ${workspace.analysis ? "complete" : "pending"}">${icon(workspace.analysis ? "check" : "clock")}</span><span><small>Status da análise</small><strong>${workspace.analysis ? "Analisada" : "Ainda não analisada"}</strong></span></div><div><span class="status-symbol">${icon("arrow")}</span><span><small>Próxima ação</small><strong>${escapeHtml(workspace.nextAction.label)}</strong></span></div><div><span class="status-symbol ${current?"complete":"pending"}">${icon(current?"check":"clock")}</span><span><small>Disponibilidade</small><strong>${current?`Confirmada ${workspace.freshness.ageDays?`há ${workspace.freshness.ageDays} dia(s)`:"hoje"}`:"Atualização recomendada"}</strong></span><button class="button quiet" type="button" data-verify-workspace>Verificar</button></div></section>`;
+  const availability = workspace.job.availability || {};
+  const availabilityLabel = workspace.job.lifecycleStatus === "CLOSED" ? "Encerrada no portal" : availability.status === "INCONCLUSIVE" ? "Disponibilidade não confirmada" : current ? "Disponibilidade confirmada" : "Atualização recomendada";
+  return `<section class="status-strip"><div><span class="status-symbol ${workspace.analysis ? "complete" : "pending"}">${icon(workspace.analysis ? "check" : "clock")}</span><span><small>Status da análise</small><strong>${workspace.analysis ? "Analisada" : "Ainda não analisada"}</strong></span></div><div><span class="status-symbol">${icon("arrow")}</span><span><small>Próxima ação</small><strong>${escapeHtml(workspace.nextAction.label)}</strong></span></div><div><span class="status-symbol ${current?"complete":"pending"}">${icon(current?"check":"clock")}</span><span><small>Disponibilidade</small><strong>${availabilityLabel}</strong><small>${availability.checkedAt ? escapeHtml(formatDate(availability.checkedAt, {dateStyle:"short",timeStyle:"short"})) : "Sem verificação no portal"}${availability.reason ? ` · ${escapeHtml(availability.reason)}` : ""}</small></span><button class="button quiet" type="button" data-verify-workspace>Verificar</button></div></section>`;
 }
 function decisionSnapshot(w) {
   const confidence = analysisConfidenceBand(w.analysis, w.priority);

@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node server.mjs",
     "test": "node --test --test-concurrency=1",
+    "test:mobile-gateway": "node --test --test-concurrency=1 tests/mobile-gateway.test.mjs",
     "test:playwright": "node --test --test-concurrency=1 tests/automation-playwright.test.mjs tests/controlled-submit-v2-1.test.mjs tests/gupy-adapter-v1.test.mjs tests/candidate-knowledge-v3-e2e.test.mjs tests/discovery-v4-e2e.test.mjs tests/experience-v2.test.mjs tests/greenhouse-hardening.test.mjs tests/integration.test.mjs tests/today-daily-decision-ui.test.mjs",
     "application:v2:validate": "node scripts/application-v2-validate.mjs",
     "controlled-submit:validate": "node scripts/controlled-submit-validate.mjs",

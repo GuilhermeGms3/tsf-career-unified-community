@@ -12,8 +12,8 @@ export class WhatsappApprovalRepository {
     this.connection.prepare(`
       INSERT INTO whatsapp_approval_requests(
         id,command_token,application_id,job_id,resume_version_id,artifact_id,
-        target_hash,status,created_at,updated_at
-      ) VALUES(?,?,?,?,?,?,?,'PREPARED',?,?)
+        target_hash,status,created_at,updated_at,expires_at
+      ) VALUES(?,?,?,?,?,?,?,'PREPARED',?,?,?)
     `).run(
       item.id || `whatsapp-approval-${randomUUID()}`,
       item.commandToken,
@@ -24,6 +24,7 @@ export class WhatsappApprovalRepository {
       item.targetHash,
       timestamp,
       timestamp,
+      item.expiresAt || new Date(Date.now()+7*24*60*60*1000).toISOString(),
     );
     return this.findByToken(item.commandToken);
   }
@@ -96,6 +97,7 @@ export class WhatsappApprovalRepository {
       decidedAt: row.decided_at || "",
       createdAt: row.created_at,
       updatedAt: row.updated_at,
+      expiresAt: row.expires_at || "",
     } : null;
   }
 }

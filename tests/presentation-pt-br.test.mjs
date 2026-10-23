@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {humanLabel,humanError,presentation} from '../public/app/presentation.js';
+
+test('policy validation tells the user which limits to correct',()=>{const error=humanError({code:'AUTO_APPLY_WHATSAPP_BAND_INVALID'});assert.match(error.message,/abaixo da nota do AutoApply/);assert.equal(error.nextAction,'Corrija os limites e salve novamente.');});
 import {statusLabel,formatDateTime} from '../public/app/ui.js';
 const matrix={AUTH_REQUIRED:'Entre na Gupy para continuar',LAUNCH_PENDING:'Aguardando abertura da janela de autenticação',AUTH_IN_PROGRESS:'Autenticação em andamento',USER_ACTION_REQUIRED:'Conclua a autenticação na janela da Gupy',AUTH_LAUNCH_FAILED:'Não foi possível abrir a janela de autenticação da Gupy.',SESSION_ACTIVE:'Acesso verificado para esta empresa',SESSION_EXPIRED:'Sua sessão expirou',PREPARATION_REQUIRED:'Prepare o currículo desta vaga',APPROVED_JOB_SPECIFIC_VERSION_REQUIRED:'Aprove um currículo específico para esta vaga',REVIEW_REQUIRED:'Revisão necessária',NOT_INDEXED:'Repositórios ainda não analisados',SYSTEM_EXTRACTED:'Extraído pelo sistema — ainda não confirmado',USER_CONFIRMED:'Confirmado por você',READY_TO_SUBMIT:'Pronta para revisão final',SUPPORTED_LIMITED:'Disponível com limitações',UNKNOWN:'Ainda não verificado',DISABLED:'Desativado',STRETCH:'Oportunidade de desenvolvimento'};
 for(const [code,expected]of Object.entries(matrix))test(`PT-BR presentation: ${code} preserves internal payload`,()=>{const model=Object.freeze({status:code});assert.equal(statusLabel(model.status),expected);assert.equal(model.status,code);assert.ok(!expected.includes(code));});

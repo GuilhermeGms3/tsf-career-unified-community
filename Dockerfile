@@ -59,6 +59,8 @@ RUN mkdir -p resources \
  && git clone --depth 1 https://github.com/yangshun/tech-interview-handbook.git resources/interview-handbook \
  && find resources -type d -name .git -prune -exec rm -rf {} +
 
+ARG TSF_REVISION=unknown
+LABEL org.opencontainers.image.revision=$TSF_REVISION
 ENV NODE_ENV=production
 ENV HUB_HOST=0.0.0.0
 ENV HUB_PORT=7123

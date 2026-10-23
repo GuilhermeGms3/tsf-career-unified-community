@@ -1,4 +1,6 @@
 import { allSettledMap, api } from "../shared/data.js";
+import { availabilityView, bindAvailability } from "./availability.js";
+import {questionFallbackView,bindQuestionFallback} from "./question-fallback.js";
 import {
   escapeHtml,
   formatDate,
@@ -21,9 +23,10 @@ const diagnosticApi=(path,timeoutMs=2500)=>Promise.race([api(path),new Promise((
 export async function renderAutopilot({ root, sectionOverride = "", embedded = false }) {
   const section = sectionOverride ||
       new URLSearchParams(location.search).get("section") || "profiles",
-    requests=section==="profiles"?{profiles:api("/api/job-hunt/profiles"),capabilities:api("/api/job-hunt/capabilities"),families:api("/api/discovery-v3/job-families"),status:api("/api/automation/status"),autoApplyPolicy:api("/api/auto-apply/policy")}:section==="companies"?{companies:api("/api/source-center/companies"),recommendations:api("/api/source-center/companies/recommendations")}:section==="notifications"?{whatsapp:diagnosticApi("/api/whatsapp/status"),status:api("/api/automation/status"),profiles:api("/api/job-hunt/profiles"),community:api("/api/discovery-v4/community-sources"),evolutionWebhook:diagnosticApi("/api/discovery-v4/evolution-webhook")}:{status:api("/api/automation/status")},
+    requests=section==="profiles"?{profiles:api("/api/job-hunt/profiles"),capabilities:api("/api/job-hunt/capabilities"),families:api("/api/discovery-v3/job-families"),runs:api("/api/job-hunt/runs?limit=20&detail=summary"),autoApplyPolicy:api("/api/auto-apply/policy")}:section==="companies"?{companies:api("/api/source-center/companies"),recommendations:api("/api/source-center/companies/recommendations")}:section==="notifications"?{whatsapp:diagnosticApi("/api/whatsapp/status"),profiles:api("/api/job-hunt/profiles"),community:api("/api/discovery-v4/community-sources"),evolutionWebhook:diagnosticApi("/api/discovery-v4/evolution-webhook")}:{runs:api("/api/job-hunt/runs?limit=20")},
     data = await allSettledMap(requests);
-  for(const key of ["profiles","capabilities","families","status","autoApplyPolicy","sources","companies","recommendations","whatsapp","community","evolutionWebhook"])data[key]??={ok:true,value:{}};
+  if (section === "profiles") data.availability = (await allSettledMap({ availability: api("/api/opportunities/verification-policy") })).availability;
+  for(const key of ["profiles","capabilities","families","runs","autoApplyPolicy","sources","companies","recommendations","whatsapp","community","evolutionWebhook"])data[key]??={ok:true,value:{}};
   const content=`${partialWarning(data)}${renderSection(section, data)}${embedded&&section==="sources"?whatsappInfrastructureView(data.whatsapp.value):""}`;
   root.innerHTML = embedded ? content : `<div class="page">${pageHeader({ eyebrow: "Descoberta contínua", title: "Automação", description: "Políticas, fontes, notificações e aplicação controlada em um único lugar." })}${tabs(
     sections.map(([id, label]) => ({
@@ -40,6 +43,7 @@ export async function renderAutopilot({ root, sectionOverride = "", embedded = f
     );
   root.querySelector(".community-source-card")?.setAttribute("id", "whatsapp-groups");
   bindAutopilotActions(root, data, section, embedded);
+  if (section === "profiles") bindAvailability(root, data.availability?.value);
 }
 export const renderSourceIntegrations=({root})=>renderAutopilot({root,sectionOverride:"sources",embedded:true});
 export async function renderOperationalIntegrations({ root }) {
@@ -75,28 +79,43 @@ function partialWarning(data) {
 }
 function renderSection(section, data) {
   if (section === "profiles")
-    return simpleAutopilotView(
+    return automationMasterControl(
+      data.profiles.value?.profiles || [],
+      data.autoApplyPolicy.value?.policy,
+    ) + availabilityView(data.availability?.value, data.availability?.ok === false) + simpleAutopilotView(
       data.profiles.value?.profiles || [],
       data.families.value?.families || [],
       data.capabilities.value?.sources || [],
-    ) + autoApplyPolicyView(data.autoApplyPolicy.value?.policy) + `<details class="content-card advanced-config"><summary>Configurações avançadas</summary>${profilesView(
+    ) + autoApplyPolicyView(data.autoApplyPolicy.value?.policy) + questionFallbackView(data.autoApplyPolicy.value?.questionFallbackPolicy) + effectiveThresholdsView(data.profiles.value?.profiles || []) + `<details class="content-card advanced-config"><summary>Configurações avançadas</summary>${profilesView(
       data.profiles.value?.profiles || [],
-      data.status.value,
+      {recentRuns:data.runs.value?.runs||[]},
       data.families.value?.families || [],
       data.capabilities.value || {},
     )}</details>`;
   if (section === "companies") return companyConnectionView(data.companies.value, data.recommendations.value);
   if (section === "notifications")
     return `${whatsappInfrastructureView(data.whatsapp.value)}${notificationPolicyView(data.whatsapp.value, data.profiles.value?.profiles || [])}${sourcesView([],data.community.value?.sources || [],data.whatsapp.value,data.evolutionWebhook.value?.webhook || {})}`;
-  return runsView(data.status.value?.recentRuns || []);
+  return runsView(data.runs.value?.runs || []);
+}
+function automationMasterControl(profiles = [], autoApplyPolicy = {}) {
+  const current = profiles.find((item) => item.enabled) || profiles[0],
+    enabled = current?.enabled === true,
+    state = !current ? "not-configured" : enabled ? "enabled" : "paused";
+  return `<section class="automation-master-control" data-automation-state="${state}" aria-labelledby="automation-master-title"><div class="automation-master-copy"><span class="automation-state-dot" aria-hidden="true"></span><div><p class="eyebrow">Controle da automação</p><h2 id="automation-master-title">${!current ? "Automação não configurada" : enabled ? "Automação ligada" : "Automação pausada"}</h2><p>${enabled ? "A busca recorrente está ativa e seguirá a frequência configurada." : "Nenhuma nova busca será iniciada pela agenda. O Mass Hunt manual continua disponível."}</p></div></div><div class="automation-master-actions">${pill(enabled ? "Ligada" : "Desligada", enabled ? "success" : "neutral")}<button class="button ${enabled ? "" : "primary"}" type="button" data-toggle-job-automation data-profile-id="${escapeHtml(current?.id || "")}" aria-pressed="${enabled}" ${current ? "" : "disabled"}>${icon(enabled ? "clock" : "spark")}${enabled ? "Pausar automação" : "Ligar automação"}</button></div><p class="form-status" data-automation-toggle-status role="status">${current ? "" : "Salve sua busca abaixo para habilitar este controle."}</p><small>Este botão controla a busca agendada. A política de AutoApply por nota permanece independente por segurança.</small></section>`;
 }
 function simpleAutopilotView(profiles = [], families = [], sources = []) {
   const current=profiles.find(item=>item.enabled)||profiles[0]||{},selectedFamilies=new Set(current.jobFamilies||[]),selectedSources=new Set(current.sourcePreferences?.length?current.sourcePreferences:sources),priorities=current.locationPolicy?.priorities||[],hasLocation=(pattern,remote=false)=>priorities.some(item=>(!remote||item.workModel==="REMOTE")&&pattern.test(`${item.location||""} ${item.remoteScope||""}`)),localDf=hasLocation(/bras[ií]lia|distrito federal|\bdf\b/i),remoteBrazil=hasLocation(/brasil/i,true),localLisbon=hasLocation(/lisboa|lisbon/i),localPorto=hasLocation(/\bporto\b/i),localBraga=hasLocation(/\bbraga\b/i),remotePortugal=hasLocation(/portugal/i,true),frequency=current.schedule?.mode==="INTERVAL"?Number(current.schedule.everyHours||6):24,sourceLabels={indeed:"Indeed",linkedin:"LinkedIn",glassdoor:"Glassdoor",google:"Google Jobs",greenhouse:"Greenhouse",lever:"Lever",ashby:"Ashby",smartrecruiters:"SmartRecruiters",workable:"Workable",iel:"IEL",programathor:"ProgramaThor",solides:"Sólides",recrutei:"Recrutei",nerdin:"Nerdin",remotar:"Remotar",monitored_companies:"Empresas monitoradas"};
-  return `<section class="task-hero"><div><p class="eyebrow">Busca automática</p><h2>Deixe o Career Unified procurar por você</h2><p>Escolha o que importa em linguagem simples. Aplicações automáticas só acontecem quando a política de nota está explicitamente ligada.</p></div><form class="task-form" data-autopilot-simple><label class="check"><input type="checkbox" name="enabled" ${current.enabled?"checked":""}/> Procurar vagas automaticamente</label><fieldset><legend>O que procurar</legend><div class="choice-grid">${families.map(item=>`<label class="check"><input type="checkbox" name="jobFamilies" value="${escapeHtml(item.id)}" ${selectedFamilies.has(item.id)?"checked":""}/> ${escapeHtml(item.label)}</label>`).join("")}</div></fieldset><fieldset><legend>Onde</legend><div class="choice-grid"><label class="check"><input type="checkbox" name="geographies" value="LOCAL_LISBON" ${localLisbon||!profiles.length?"checked":""}/> Lisboa</label><label class="check"><input type="checkbox" name="geographies" value="LOCAL_PORTO" ${localPorto||!profiles.length?"checked":""}/> Porto</label><label class="check"><input type="checkbox" name="geographies" value="LOCAL_BRAGA" ${localBraga?"checked":""}/> Braga</label><label class="check"><input type="checkbox" name="geographies" value="REMOTE_PORTUGAL" ${remotePortugal||!profiles.length?"checked":""}/> Remoto Portugal</label><label class="check"><input type="checkbox" name="geographies" value="LOCAL_DF" ${localDf?"checked":""}/> Brasília / DF</label><label class="check"><input type="checkbox" name="geographies" value="REMOTE_BRAZIL" ${remoteBrazil?"checked":""}/> Remoto Brasil</label></div></fieldset><fieldset><legend>Fontes da busca</legend><div class="choice-grid">${sources.map(source=>`<label class="check"><input type="checkbox" name="sourcePreferences" value="${escapeHtml(source)}" ${selectedSources.has(source)?"checked":""}/> ${escapeHtml(sourceLabels[source]||source)}</label>`).join("")}</div></fieldset><label><span>Frequência</span><select name="everyHours"><option value="6" ${frequency===6?"selected":""}>A cada 6 horas</option><option value="12" ${frequency===12?"selected":""}>A cada 12 horas</option><option value="24" ${frequency===24?"selected":""}>Uma vez por dia</option></select></label><fieldset><legend>Quando encontrar</legend><div class="choice-grid"><label class="check"><input type="checkbox" checked disabled/> Salvar oportunidades</label><label class="check"><input type="checkbox" name="notify" checked/> Me avisar</label><label class="check"><input type="checkbox" name="whatsapp" checked/> Avisar por WhatsApp</label></div></fieldset><button class="button primary" type="submit">Salvar automação</button><p class="form-status" role="status"></p></form></section>`;
+  return `<section class="task-hero"><div><p class="eyebrow">Configuração da busca</p><h2>Onde e quando procurar</h2><p>Escolha o que importa em linguagem simples. Use o controle acima para ligar ou pausar a agenda.</p></div><form class="task-form" data-autopilot-simple><fieldset><legend>O que procurar</legend><div class="choice-grid">${families.map(item=>`<label class="check"><input type="checkbox" name="jobFamilies" value="${escapeHtml(item.id)}" ${selectedFamilies.has(item.id)?"checked":""}/> ${escapeHtml(item.label)}</label>`).join("")}</div></fieldset><fieldset><legend>Onde</legend><div class="choice-grid"><label class="check"><input type="checkbox" name="geographies" value="LOCAL_LISBON" ${localLisbon||!profiles.length?"checked":""}/> Lisboa</label><label class="check"><input type="checkbox" name="geographies" value="LOCAL_PORTO" ${localPorto||!profiles.length?"checked":""}/> Porto</label><label class="check"><input type="checkbox" name="geographies" value="LOCAL_BRAGA" ${localBraga?"checked":""}/> Braga</label><label class="check"><input type="checkbox" name="geographies" value="REMOTE_PORTUGAL" ${remotePortugal||!profiles.length?"checked":""}/> Remoto Portugal</label><label class="check"><input type="checkbox" name="geographies" value="LOCAL_DF" ${localDf?"checked":""}/> Brasília / DF</label><label class="check"><input type="checkbox" name="geographies" value="REMOTE_BRAZIL" ${remoteBrazil?"checked":""}/> Remoto Brasil</label></div></fieldset><fieldset><legend>Fontes da busca</legend><div class="choice-grid">${sources.map(source=>`<label class="check"><input type="checkbox" name="sourcePreferences" value="${escapeHtml(source)}" ${selectedSources.has(source)?"checked":""}/> ${escapeHtml(sourceLabels[source]||source)}</label>`).join("")}</div></fieldset><label><span>Frequência</span><select name="everyHours"><option value="6" ${frequency===6?"selected":""}>A cada 6 horas</option><option value="12" ${frequency===12?"selected":""}>A cada 12 horas</option><option value="24" ${frequency===24?"selected":""}>Uma vez por dia</option></select></label><fieldset><legend>Quando encontrar</legend><div class="choice-grid"><label class="check"><input type="checkbox" checked disabled/> Salvar oportunidades</label><label class="check"><input type="checkbox" name="notify" checked/> Me avisar</label><label class="check"><input type="checkbox" name="whatsapp" checked/> Avisar por WhatsApp</label></div></fieldset><button class="button primary" type="submit">Salvar configuração</button><p class="form-status" role="status"></p></form></section>`;
 }
 function autoApplyPolicyView(policy = {}) {
   const minimumAtsScore = Number(policy.minimumAtsScore ?? 80);
-  return `<section class="content-card"><div class="section-heading"><div><p class="eyebrow">AutoApply por nota</p><h2>Destino por nota ATS</h2><p>Vale para Mass Hunt, busca específica e vagas adicionadas por link.</p></div>${pill(policy.enabled ? "Ativo" : "Desligado", policy.enabled ? "success" : "neutral")}</div><form class="task-form" data-auto-apply-policy><label class="check"><input type="checkbox" name="enabled" ${policy.enabled ? "checked" : ""}/> Usar os limites abaixo</label><div class="form-grid"><label><span>AutoApply a partir de</span><input name="minimumAtsScore" type="number" min="1" max="100" step="1" value="${minimumAtsScore}" /></label><label><span>WhatsApp a partir de</span><input name="whatsappMinimumAtsScore" type="number" min="0" max="100" step="1" value="${Number(policy.whatsappMinimumAtsScore ?? 60)}" /></label><label><span>WhatsApp até</span><input name="whatsappMaximumAtsScore" type="number" min="0" max="100" step="1" value="${Number(policy.whatsappMaximumAtsScore ?? 79)}" /></label></div><p class="field-help">Com a política ativa, notas de 80 para cima iniciam AutoApply e, nos destinos homologados, AutoSubmit. De 60 a 79, o currículo segue ao WhatsApp para revisão. Abaixo de 60, fica em Candidaturas para análise dentro da plataforma. Qualidade editorial, evidências, elegibilidade, disponibilidade, sessão, formulário, idempotência e recibo continuam obrigatórios.</p><button class="button primary" type="submit">Salvar política de AutoApply</button><p class="form-status" role="status"></p></form></section>`;
+  const whatsappMinimum=Number(policy.whatsappMinimumAtsScore ?? 60),whatsappMaximum=Number(policy.whatsappMaximumAtsScore ?? 79);
+  return `<section class="content-card"><div class="section-heading"><div><p class="eyebrow">AutoApply por nota</p><h2>Destino por nota ATS</h2><p>Vale para Mass Hunt, busca específica e vagas adicionadas por link.</p></div>${pill(policy.enabled ? "Ativo" : "Desligado", policy.enabled ? "success" : "neutral")}</div><form class="task-form" data-auto-apply-policy><label class="check"><input type="checkbox" name="enabled" ${policy.enabled ? "checked" : ""}/> Usar os limites abaixo</label><div class="form-grid"><label><span>AutoApply a partir de</span><input name="minimumAtsScore" type="number" min="1" max="100" step="1" value="${minimumAtsScore}" /></label><label><span>WhatsApp a partir de</span><input name="whatsappMinimumAtsScore" type="number" min="0" max="100" step="1" value="${whatsappMinimum}" /></label><label><span>WhatsApp até</span><input name="whatsappMaximumAtsScore" type="number" min="0" max="100" step="1" value="${whatsappMaximum}" /></label></div><p class="field-help">Com a política ativa, notas a partir de ${minimumAtsScore} iniciam AutoApply e, nos destinos homologados, AutoSubmit. De ${whatsappMinimum} a ${whatsappMaximum}, o currículo segue ao WhatsApp para revisão. Fora dessas faixas, fica na plataforma. Qualidade editorial, evidências, elegibilidade, disponibilidade, sessão, formulário, idempotência e recibo continuam obrigatórios.</p><button class="button primary" type="submit">Salvar política de AutoApply</button><p class="form-status" role="status"></p></form></section>`;
+}
+function effectiveThresholdsView(profiles) {
+  const current=profiles.find(profile=>profile.enabled)||profiles[0],limits=current?.effectiveThresholds;
+  if(!limits)return "";
+  return `<section class="content-card"><h2>Limites efetivos da busca</h2><p>${limits.authority==="AUTO_APPLY_POLICY"?"Política global de encaminhamento ativa":"Limites do perfil de busca"}</p><div class="policy-thresholds"><span>Considerar <strong>${limits.consider}</strong></span><span>Preparar currículo <strong>${limits.prepareResume}</strong></span><span>Notificar <strong>${limits.notify}</strong></span></div></section>`;
 }
 function profilesView(profiles, status = {}, families = [], capabilities = {}) {
   const runs = status?.recentRuns || [],
@@ -265,12 +284,13 @@ function profilePayload(form, existing = {}) {
   };
 }
 function bindAutopilotActions(root, data, section, embedded = false) {
+  bindQuestionFallback(root);
   root.querySelector("[data-auto-apply-policy]")?.addEventListener("submit",async event=>{
     event.preventDefault();
     const form=event.currentTarget,status=form.querySelector(".form-status"),minimumAtsScore=Number(form.elements.minimumAtsScore.value),whatsappMinimumAtsScore=Number(form.elements.whatsappMinimumAtsScore.value),whatsappMaximumAtsScore=Number(form.elements.whatsappMaximumAtsScore.value);
     if(![minimumAtsScore,whatsappMinimumAtsScore,whatsappMaximumAtsScore].every(Number.isInteger)||minimumAtsScore<1||minimumAtsScore>100||whatsappMinimumAtsScore<0||whatsappMinimumAtsScore>whatsappMaximumAtsScore||whatsappMaximumAtsScore>=minimumAtsScore){status.textContent="Defina uma faixa de WhatsApp válida abaixo da nota de envio automático.";return;}
     status.textContent="Salvando política…";
-    try{await api("/api/auto-apply/policy",{method:"PUT",body:JSON.stringify({enabled:form.elements.enabled.checked,minimumAtsScore,whatsappMinimumAtsScore,whatsappMaximumAtsScore})});status.textContent="Política de AutoApply salva.";toast("Política de AutoApply atualizada.");}
+    try{await api("/api/auto-apply/policy",{method:"PUT",body:JSON.stringify({enabled:form.elements.enabled.checked,minimumAtsScore,whatsappMinimumAtsScore,whatsappMaximumAtsScore})});await renderAutopilot({root,sectionOverride:section,embedded});toast("Política de AutoApply atualizada.");}
     catch(error){status.textContent=error.message;}
   });
   root
@@ -302,6 +322,27 @@ function bindAutopilotActions(root, data, section, embedded = false) {
   );
   const profileDialog = root.querySelector("#profile-dialog"),
     profiles = data.profiles.value?.profiles || [];
+  const simpleForm=root.querySelector("[data-autopilot-simple]"),currentProfile=profiles.find(profile=>profile.enabled)||profiles[0];
+  if(simpleForm && currentProfile){
+    simpleForm.elements.notify.checked=currentProfile.notificationPolicy?.decisionClasses?.length!==0;
+    simpleForm.elements.whatsapp.checked=currentProfile.notificationPolicy?.delivery?.includes("WHATSAPP")!==false;
+  }
+  root.querySelector("[data-toggle-job-automation]")?.addEventListener("click",async event=>{
+    const button=event.currentTarget,profile=profiles.find(item=>item.id===button.dataset.profileId),status=root.querySelector("[data-automation-toggle-status]");
+    if(!profile){status.textContent="Salve primeiro uma configuração de busca.";return;}
+    const enabled=profile.enabled!==true;
+    button.disabled=true;
+    status.textContent=enabled?"Ligando automação…":"Pausando automação…";
+    try{
+      await api(`/api/job-hunt/profiles/${encodeURIComponent(profile.id)}`,{method:"PUT",body:JSON.stringify({...profile,enabled})});
+      await renderAutopilot({root,sectionOverride:section,embedded});
+      toast(enabled?"Automação ligada.":"Automação pausada.");
+    }catch(error){
+      button.disabled=false;
+      status.textContent=error.message;
+      toast("Não foi possível alterar a automação.","error");
+    }
+  });
   root.querySelector("[data-autopilot-simple]")?.addEventListener("submit",async event=>{
     event.preventDefault();
     const form=event.currentTarget,status=form.querySelector(".form-status"),current=profiles.find(item=>item.enabled)||profiles[0]||{},familyIds=[...form.querySelectorAll('[name="jobFamilies"]:checked')].map(item=>item.value),geographies=[...form.querySelectorAll('[name="geographies"]:checked')].map(item=>item.value);
@@ -316,9 +357,9 @@ function bindAutopilotActions(root, data, section, embedded = false) {
     if(geographies.includes("REMOTE_PORTUGAL"))priorities.push({priority:priorities.length+1,location:"Portugal",workModel:"REMOTE",remoteScope:"Portugal",accepted:true});
     const sourcePreferences=[...form.querySelectorAll('[name="sourcePreferences"]:checked')].map(item=>item.value);
     if(!sourcePreferences.length){status.textContent="Selecione ao menos uma fonte de vagas.";return;}
-    const payload={...current,name:current.name||"Minha busca automática",enabled:form.elements.enabled.checked,jobFamilies:familyIds,seniorities:current.seniorities?.length?current.seniorities:["INTERNSHIP","JUNIOR"],locations:priorities.map(item=>item.location),locationPolicy:{priorities,allowOnsiteOutsideArea:false},workModels:[...new Set(priorities.map(item=>item.workModel))],sourcePreferences,considerThreshold:current.considerThreshold??70,prepareResumeThreshold:current.prepareResumeThreshold??82,notifyThreshold:current.notifyThreshold??90,prepareResume:true,schedule:{...(current.schedule||{}),mode:"INTERVAL",everyHours:Number(form.elements.everyHours.value)},queryBudget:{...(current.queryBudget||{}),maxQueries:Math.max(6,Number(current.queryBudget?.maxQueries)||0),maxQueriesPerProvider:Math.max(2,Number(current.queryBudget?.maxQueriesPerProvider)||0),maxRequests:Math.max(20,Number(current.queryBudget?.maxRequests)||0),concurrency:1},notificationPolicy:{...(current.notificationPolicy||{}),decisionClasses:form.elements.notify.checked?["RECOMMENDED","REVIEW"]:[],delivery:form.elements.whatsapp.checked?["WHATSAPP"]:[]}};
+    const payload={...current,name:current.name||"Minha busca automática",enabled:current.enabled===true,jobFamilies:familyIds,seniorities:current.seniorities?.length?current.seniorities:["INTERNSHIP","JUNIOR"],locations:priorities.map(item=>item.location),locationPolicy:{priorities,allowOnsiteOutsideArea:false},workModels:[...new Set(priorities.map(item=>item.workModel))],sourcePreferences,considerThreshold:current.considerThreshold??70,prepareResumeThreshold:current.prepareResumeThreshold??82,notifyThreshold:current.notifyThreshold??90,prepareResume:true,schedule:{...(current.schedule||{}),mode:"INTERVAL",everyHours:Number(form.elements.everyHours.value)},queryBudget:{...(current.queryBudget||{}),maxQueries:Math.max(6,Number(current.queryBudget?.maxQueries)||0),maxQueriesPerProvider:Math.max(2,Number(current.queryBudget?.maxQueriesPerProvider)||0),maxRequests:Math.max(20,Number(current.queryBudget?.maxRequests)||0),concurrency:1},notificationPolicy:{...(current.notificationPolicy||{}),decisionClasses:form.elements.notify.checked?["RECOMMENDED","REVIEW"]:[],delivery:form.elements.whatsapp.checked?["WHATSAPP"]:[]}};
     status.textContent="Salvando automação…";
-    try{await api(current.id?`/api/job-hunt/profiles/${encodeURIComponent(current.id)}`:"/api/job-hunt/profiles",{method:current.id?"PUT":"POST",body:JSON.stringify(payload)});status.textContent="Busca automática salva.";toast("Busca automática atualizada.");}catch(error){status.textContent=error.message;}
+    try{await api(current.id?`/api/job-hunt/profiles/${encodeURIComponent(current.id)}`:"/api/job-hunt/profiles",{method:current.id?"PUT":"POST",body:JSON.stringify(payload)});await renderAutopilot({root,sectionOverride:section,embedded});toast("Configuração da busca atualizada.");}catch(error){status.textContent=error.message;}
   });
   root.querySelector("[data-notification-policy]")?.addEventListener("submit",async event=>{
     event.preventDefault();

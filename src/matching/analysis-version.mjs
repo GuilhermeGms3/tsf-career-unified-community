@@ -1,5 +1,5 @@
 export const CURRENT_MATCHER_VERSION = "ats-matcher-v2";
-export const CURRENT_SCORING_MODEL_VERSION = "confidence-calibrated-v1";
+export const CURRENT_SCORING_MODEL_VERSION = "confidence-calibrated-v2";
 export const CURRENT_REQUIREMENT_EXTRACTOR_VERSION = "requirements-v3";
 
 export const ATS_ANALYSIS_STATUS = Object.freeze({

@@ -1,0 +1,201 @@
+# Docker Standalone: build the three local images on the target host first.
+# No source bind mounts, Windows paths or public administrative ports.
+name: tsf-production
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  app:
+    image: ${TSF_APP_IMAGE:?Build and set TSF_APP_IMAGE on the target Docker host}
+    pull_policy: never
+    init: true
+    shm_size: 256mb
+    ports:
+      - "127.0.0.1:7123:7123"
+      - "127.0.0.1:7125:7125"
+    environment:
+      HUB_HOST: 0.0.0.0
+      HUB_PORT: 7123
+      HUB_DATA_DIR: /app/data
+      NODE_ENV: production
+      CAREER_DEFAULT_COUNTRY: ${CAREER_DEFAULT_COUNTRY:-Portugal}
+      CAREER_OPERATION_MODE: ${CAREER_OPERATION_MODE:-maintenance}
+      CAREER_WEB_TRUST_PROXY: "true"
+      CAREER_WEB_ALLOWED_TAILSCALE_USERS: ${CAREER_WEB_ALLOWED_TAILSCALE_USERS:?Set the owner Tailscale identity}
+      CAREER_WEB_PROXY_ADDRESSES: ${CAREER_WEB_PROXY_ADDRESSES:?Set the actual Docker gateway proxy address}
+      CAREER_PUBLIC_URL: ${CAREER_PUBLIC_URL:?Set the private HTTPS Tailscale Serve URL}
+      CAREER_ENGINE_URL: http://career-engine:7130
+      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
+      CAREER_LLM_ALLOWED_ORIGINS: ${CAREER_LLM_ALLOWED_ORIGINS:-}
+      AUTOMATION_HEADLESS: "true"
+      LIVE_INSPECT: "false"
+      CAREER_SUBMISSION_ENABLED: ${CAREER_SUBMISSION_ENABLED:-false}
+      MOBILE_GATEWAY_ENABLED: ${MOBILE_GATEWAY_ENABLED:-false}
+      MOBILE_GATEWAY_HOST: 0.0.0.0
+      MOBILE_GATEWAY_PORT: 7125
+      MOBILE_GATEWAY_TRUST_PROXY: "true"
+      MOBILE_GATEWAY_ALLOWED_TAILSCALE_USERS: ${MOBILE_GATEWAY_ALLOWED_TAILSCALE_USERS:-}
+      MOBILE_GATEWAY_REQUIRED_CAPABILITY: ${MOBILE_GATEWAY_REQUIRED_CAPABILITY:-}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      GITHUB_OAUTH_CLIENT_ID: ${GITHUB_OAUTH_CLIENT_ID:-}
+      BRAVE_SEARCH_API_KEY: ${BRAVE_SEARCH_API_KEY:-}
+      LOG_RETENTION_DAYS: ${LOG_RETENTION_DAYS:-30}
+      LOG_MAX_ROWS: ${LOG_MAX_ROWS:-5000}
+      CAREER_CREDENTIAL_KEY_PATH: /run/career-unified-secrets/source-credentials.key
+      N8N_INTERNAL_URL: http://n8n:5678
+      CAREER_N8N_WEBHOOK_SECRET: ${CAREER_N8N_WEBHOOK_SECRET:?Set a random webhook secret}
+      EVOLUTION_INTERNAL_URL: http://evolution-api:8080
+      EVOLUTION_MANAGER_URL: ${EVOLUTION_MANAGER_URL:-http://127.0.0.1:8081/manager}
+      EVOLUTION_API_KEY: ${EVOLUTION_API_KEY:?Set a random Evolution API key}
+      EVOLUTION_INSTANCE_NAME: ${EVOLUTION_INSTANCE_NAME:-career-unified}
+      CAREER_EVOLUTION_WEBHOOK_SECRET: ${CAREER_EVOLUTION_WEBHOOK_SECRET:?Set a random inbound webhook secret}
+      CAREER_WHATSAPP_TARGET: ${CAREER_WHATSAPP_TARGET:-}
+      CAREER_WHATSAPP_APPROVER: ${CAREER_WHATSAPP_APPROVER:-}
+      CAREER_QUESTION_LLM_TIMEOUT_MS: ${CAREER_QUESTION_LLM_TIMEOUT_MS:-12000}
+      TZ: ${TZ:-Europe/Lisbon}
+    volumes:
+      - type: bind
+        source: ${TSF_DATA_DIR:-/srv/tsf/data}
+        target: /app/data
+        bind:
+          create_host_path: false
+      - source_credential_keys:/run/career-unified-secrets
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    stop_grace_period: 45s
+    logging: *logging
+    depends_on:
+      career-engine:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:7123/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  career-engine:
+    image: ${TSF_ENGINE_IMAGE:?Build and set TSF_ENGINE_IMAGE on the target Docker host}
+    environment:
+      CAREER_DEFAULT_COUNTRY: ${CAREER_DEFAULT_COUNTRY:-Portugal}
+    pull_policy: never
+    restart: unless-stopped
+    logging: *logging
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:7130/health')"]
+      interval: 20s
+      timeout: 8s
+      retries: 8
+      start_period: 30s
+
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:2.34.6
+    ports:
+      - "127.0.0.1:${TSF_N8N_HOST_PORT:-15678}:5678"
+    environment:
+      N8N_HOST: n8n
+      N8N_PORT: 5678
+      N8N_PROTOCOL: http
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:?Set a permanent random encryption key}
+      N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS: "true"
+      N8N_SECURE_COOKIE: "true"
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
+      NODE_FUNCTION_ALLOW_BUILTIN: crypto
+      GENERIC_TIMEZONE: ${TZ:-Europe/Lisbon}
+      TZ: ${TZ:-Europe/Lisbon}
+      CAREER_N8N_WEBHOOK_SECRET: ${CAREER_N8N_WEBHOOK_SECRET:?Set a random webhook secret}
+      EVOLUTION_API_KEY: ${EVOLUTION_API_KEY:?Set a random Evolution API key}
+      EVOLUTION_INSTANCE_NAME: ${EVOLUTION_INSTANCE_NAME:-career-unified}
+      CAREER_WHATSAPP_TARGET: ${CAREER_WHATSAPP_TARGET:-}
+    volumes:
+      - n8n_data:/home/node/.n8n
+    restart: unless-stopped
+    logging: *logging
+    depends_on:
+      evolution-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5678/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 20s
+      timeout: 5s
+      retries: 10
+
+  evolution-api:
+    image: ${TSF_EVOLUTION_IMAGE:?Build and set TSF_EVOLUTION_IMAGE on the target Docker host}
+    pull_policy: never
+    ports:
+      - "127.0.0.1:${TSF_EVOLUTION_HOST_PORT:-18081}:8080"
+    environment:
+      SERVER_URL: http://evolution-api:8080
+      LOG_LEVEL: ${EVOLUTION_LOG_LEVEL:-ERROR}
+      LOG_BAILEYS: ${EVOLUTION_LOG_BAILEYS:-error}
+      AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY:?Set a random Evolution API key}
+      DATABASE_ENABLED: "true"
+      DATABASE_PROVIDER: postgresql
+      DATABASE_CONNECTION_URI: postgresql://evolution:${EVOLUTION_POSTGRES_PASSWORD:?Set an alphanumeric random database password}@evolution-postgres:5432/evolution
+      DATABASE_SAVE_DATA_INSTANCE: "true"
+      DATABASE_SAVE_DATA_NEW_MESSAGE: "true"
+      DATABASE_SAVE_MESSAGE_UPDATE: "true"
+      CACHE_REDIS_ENABLED: "true"
+      CACHE_REDIS_URI: redis://evolution-redis:6379/6
+      CACHE_REDIS_PREFIX_KEY: evolution
+      CACHE_LOCAL_ENABLED: "false"
+      DEL_INSTANCE: "false"
+      LANGUAGE: pt-BR
+    volumes:
+      - evolution_instances:/evolution/instances
+    restart: unless-stopped
+    logging:
+      driver: "none"
+    depends_on:
+      evolution-postgres:
+        condition: service_healthy
+      evolution-redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/ >/dev/null 2>&1 || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  evolution-postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: evolution
+      POSTGRES_PASSWORD: ${EVOLUTION_POSTGRES_PASSWORD:?Set an alphanumeric random database password}
+      POSTGRES_DB: evolution
+    volumes:
+      - evolution_postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    logging: *logging
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U evolution -d evolution"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  evolution-redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - evolution_redis_data:/data
+    restart: unless-stopped
+    logging: *logging
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  source_credential_keys:
+  n8n_data:
+  evolution_instances:
+  evolution_postgres_data:
+  evolution_redis_data:

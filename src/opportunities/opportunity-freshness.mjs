@@ -21,7 +21,7 @@ export function opportunityFreshness(job = {}, now = new Date()) {
   const confirmedTime = parsedTime(confirmedAt);
   const ageMs = confirmedTime ? Math.max(0, now.getTime() - confirmedTime) : null;
   const ageDays = ageMs === null ? null : Math.floor(ageMs / DAY_MS);
-  const current = lifecycle === "OPEN" && ageMs !== null && ageMs <= TODAY_CONFIRMATION_MAX_AGE_MS;
+  const current = lifecycle === "OPEN" && availability.status !== "INCONCLUSIVE" && ageMs !== null && ageMs <= TODAY_CONFIRMATION_MAX_AGE_MS;
   let status = "NEVER_CONFIRMED";
   if (lifecycle === "CLOSED") status = "CLOSED";
   else if (availability.status === "INCONCLUSIVE") status = "INCONCLUSIVE";
@@ -39,11 +39,29 @@ export function opportunityFreshness(job = {}, now = new Date()) {
 export function duplicateOpportunityKey(job = {}) {
   const company = fold(job.company);
   const title = fold(job.title);
-  const location = fold(job.location);
+  const rawLocation = fold(job.location);
+  const remote = /^(remote|remoto)$/i.test(job.workModel || "") || job.remote === true;
+  // Do not collapse different cities or explicit foreign remote scopes.
+  const country = fold(job.country);
+  const brazilScope = !country || ["br", "brasil", "brazil"].includes(country);
+  const location = remote && brazilScope && (!rawLocation || /^(remoto |remote )?(brasil|brazil|br)$/.test(rawLocation))
+    ? "remote:brazil"
+    : rawLocation || country;
   if (company && title && location) return `${company}|${title}|${location}`;
   try {
     const url = new URL(job.canonicalUrl || job.applicationUrl || job.url || "");
     const pathname = url.pathname.replace(/\/+$/, "").toLowerCase();
     return pathname ? `url:${url.hostname.toLowerCase()}${pathname}` : "";
   } catch { return ""; }
+}
+
+export function distinctOpportunityJobs(jobs = []) {
+  const groups = new Map();
+  for (const job of jobs) {
+    const key = duplicateOpportunityKey(job) || `job:${job.id}`;
+    const current = groups.get(key);
+    const quality = value => Number((value.description || "").length >= 100) * 2 + Number(["gupy", "lever", "greenhouse", "ashby", "smartrecruiters", "workable"].includes(value.provider));
+    if (!current || quality(job) > quality(current)) groups.set(key, job);
+  }
+  return [...groups.values()];
 }

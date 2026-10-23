@@ -12,6 +12,24 @@ class RefreshRuns {
   latest() { return [...this.items.values()].at(-1) || null; }
 }
 
+test("checagem do catálogo independe de perfil, relevância e candidatura e percorre os mais antigos", async () => {
+  const runs = new RefreshRuns(), checked = [];
+  const jobs = [
+    { id: "recent", lastCheckedAt: "2026-10-14", lifecycleStatus: "OPEN" },
+    { id: "old", lastCheckedAt: "2026-01-01", lifecycleStatus: "OPEN" },
+    { id: "never", lifecycleStatus: "UNKNOWN" },
+    { id: "closed", lifecycleStatus: "CLOSED" },
+  ];
+  const service = new DailyRefreshService({ store: { jobs: { all: () => jobs }, dailyRefreshRuns: runs }, opportunityService: { invalidate() {}, list: async () => { throw new Error("Não deve ranquear para escolher o lote"); } }, decisionInbox: { build: async () => ({}) },
+    availabilityService: { verify: async id => { checked.push(id); return { availability: { status: id === "old" ? "CLOSED" : "AVAILABLE", reason: "fixture", checkedAt: new Date().toISOString() } }; } } });
+  const run = runs.start();
+  const result = await service.execute(run.id, null, { skipSearch: true, catalog: true, batchSize: 2 });
+  assert.deepEqual(checked.sort(), ["never", "old"]);
+  assert.equal(result.closedCount, 1);
+  assert.equal(result.remainingCount, 1);
+  assert.equal(result.result.checks.length, 2);
+});
+
 test("Hoje entrega snapshot persistido sem reconstruir a projeção pesada", async () => {
   const inbox = { generatedAt: new Date().toISOString(), items: [], dailyDecision: {} };
   const service = new DecisionInboxService({

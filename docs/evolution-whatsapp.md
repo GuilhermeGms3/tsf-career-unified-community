@@ -19,6 +19,12 @@ O QR existe somente na resposta transitória da sessão do browser: não entra e
 
 ## Recuperação
 
+Consulte a [homologação operacional](operational-homologation-2026-10-13.md)
+antes de adotar o override experimental de compatibilidade. `CONNECTED`
+indica estado de sessão, não comprovação de recebimento de comandos. O evento
+`WHATSAPP_APPROVAL_ANALYZED` registra tempos sanitizados de processamento,
+envio e idade da mensagem para investigar atrasos sem guardar a conversa.
+
 - Instância desconectada: gere novo QR; não recrie volumes sem necessidade.
 - `401/403`: valide que a mesma chave está no n8n e Evolution, sem imprimi-la.
 - Mensagem não chega: confira conexão, número internacional e execuções do workflow.

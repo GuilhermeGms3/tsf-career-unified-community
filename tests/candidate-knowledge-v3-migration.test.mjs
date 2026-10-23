@@ -21,7 +21,7 @@ test("migration 018 upgrades schema 17 within current migration chain and preser
   for(const name of files.filter(name=>Number(name.slice(0,3))>=18))await copyFile(path.join(sourceMigrations,name),path.join(migrationsDir,name));
   const store=await new UnifiedStateStore({dataDir,migrationsDir,databasePath}).initialize();
   try{
-    assert.equal(store.database.connection.prepare("SELECT MAX(version) version FROM schema_migrations").get().version, 51);
+    assert.equal(store.database.connection.prepare("SELECT MAX(version) version FROM schema_migrations").get().version, 58);
     assert.equal(store.candidateFacts.find("skill.grafana").value,"Grafana");
     const entity=store.careerEvidence.entities().find(item=>item.organization==="Empresa Legada");assert.equal(entity.role,"Analista");
     const legacy=store.careerEvidence.evidence({factKey:"skill.grafana"})[0];assert.equal(legacy.contextType,"LEGACY");assert.equal(legacy.depth,"UNKNOWN");

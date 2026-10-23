@@ -53,7 +53,9 @@ pending; they are never converted into closure. The final status is `PARTIAL`
 when a source fails, a check is inconclusive or stale candidates remain.
 
 `POST /api/opportunities/verify` reuses only the availability and inbox rebuild
-stages. It does not start discovery. Its persisted progress is available at
+stages, now across the catalog rather than only stale prioritized jobs. The
+batch size comes from the independent [availability schedule](periodic-availability.md).
+It does not start discovery. Its persisted progress is available at
 `GET /api/opportunities/verify/:id`; inconclusive responses never close a job.
 
 ## Persistence

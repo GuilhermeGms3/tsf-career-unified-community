@@ -52,6 +52,7 @@ import { SkillGapAnalyzer } from "./src/intelligence/tasks/skill-gap-analyzer.mj
 import { SemanticEvidenceMatcher } from "./src/intelligence/tasks/semantic-evidence-matcher.mjs";
 import { SemanticRequirementEnhancer } from "./src/intelligence/tasks/semantic-requirement-enhancer.mjs";
 import { IntelligenceWorker } from "./src/intelligence/intelligence-worker.mjs";
+import {approvedLlmEndpoint} from "./src/security/llm-endpoint-policy.mjs";
 import {createProviderRegistry} from "./src/discovery/provider-catalog.mjs";
 import {discoveryTimeoutPolicy} from "./src/discovery/discovery-timeout-policy.mjs";
 import {DiscoveryService} from "./src/discovery/discovery-service.mjs";
@@ -74,6 +75,7 @@ import {ProviderTestService} from "./src/discovery/provider-test-service.mjs";
 import {JobHuntService} from "./src/automation/job-hunt-service.mjs";
 import {OpportunityService} from "./src/opportunities/opportunity-service.mjs";
 import {OpportunityAvailabilityService} from "./src/opportunities/opportunity-availability-service.mjs";
+import {AvailabilityScheduler} from "./src/opportunities/availability-scheduler.mjs";
 import {DecisionInboxService} from "./src/product/decision-inbox-service.mjs";
 import {WeeklyTechRadarService} from "./src/product/weekly-tech-radar-service.mjs";
 import {DailyRefreshService} from "./src/product/daily-refresh-service.mjs";
@@ -89,6 +91,8 @@ import {WhatsappApprovalGateway} from "./src/integrations/evolution/whatsapp-app
 import {ResumeApprovalDispatcher} from "./src/integrations/evolution/resume-approval-dispatcher.mjs";
 import {AutoApplyOrchestrator} from "./src/automation/auto-apply-orchestrator.mjs";
 import {ApplicationQuestionEscalationService} from "./src/automation/application-question-escalation-service.mjs";
+import {DelayedQuestionService,DELAYED_QUESTION_TASK,selectQuestionModel} from "./src/automation/delayed-question-service.mjs";
+import {submissionRuntimeEnabled} from "./src/application/submission-runtime-policy.mjs";
 import {BraveSearchProvider} from "./src/discovery/public-web/brave-search-provider.mjs";
 import {CredentialVault} from "./src/discovery/source-center/credential-vault.mjs";
 import {sourceOnboardingRegistry} from "./src/discovery/source-center/source-onboarding-registry.mjs";
@@ -107,6 +111,13 @@ import {LeadPromotionService} from "./src/discovery/v4/lead-promotion-service.mj
 import {RuntimeCapabilityService} from "./src/discovery/v4/runtime-capability-service.mjs";
 import {completeLegacySchedule,failLegacySchedule,legacyScheduleLogContext,LEGACY_SCHEDULE_STATUS,runDueLegacySchedules} from "./src/scheduler/legacy-search-scheduler-policy.mjs";
 import {createApplicationV2Routes,createAtsRoutes,createAutopilotRoutes,createCandidateKnowledgeRoutes,createCoverageBenchmarkRoutes,createDiscoveryV3Routes,createDiscoveryV4Routes,createExperienceRoutes,createOpportunityRoutes,createQualityLabRoutes,createResumeBatchRoutes,createSourceRoutes,createTodayRoutes,createWhatsappRoutes} from "./server/routes/index.mjs";
+import { createMobileGateway } from "./server/mobile/mobile-gateway.mjs";
+import { mobileGatewayConfig } from "./server/mobile/mobile-auth.mjs";
+import { runtimeOperationPolicy } from "./server/runtime-operation-policy.mjs";
+import {trustedWebConfig,authorizeWebRequest} from "./server/trusted-web-access.mjs";
+
+const runtimePolicy = runtimeOperationPolicy();
+const webConfig = trustedWebConfig();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = __dirname;
@@ -131,13 +142,16 @@ const defaultCountry = String(process.env.CAREER_DEFAULT_COUNTRY || "Portugal").
 const unifiedStore = await new UnifiedStateStore({
   dataDir: hubDataDir,
   legacyStatePath: unifiedStatePath,
-  databasePath: unifiedDatabasePath
+  databasePath: unifiedDatabasePath,
+  startupEffects: runtimePolicy.backgroundEnabled,
 }).initialize();
-unifiedStore.candidateFacts.syncProfile(CandidateKnowledgeBase.fromProfile(await readProfile()).all());
+if (runtimePolicy.backgroundEnabled) unifiedStore.candidateFacts.syncProfile(CandidateKnowledgeBase.fromProfile(await readProfile()).all());
 const candidateKnowledgeFacts=()=>{const evidence=unifiedStore.careerEvidence.evidence(),byFact=new Map();for(const item of evidence){if(!byFact.has(item.factKey))byFact.set(item.factKey,[]);byFact.get(item.factKey).push(item);}return unifiedStore.candidateFacts.active().map(fact=>({...fact,evidences:byFact.get(fact.key)||[]}));};
 let githubEvidenceProvider=null;
 const runCareerMatcher=input=>{const analysis=runAtsMatcherV2({...input,knowledgeFacts:candidateKnowledgeFacts(),evidenceProviders:githubEvidenceProvider?[githubEvidenceProvider]:[]});const usedSections=new Set(analysis.items.filter(item=>["MATCH","PARTIAL_MATCH"].includes(item.status)).flatMap(item=>item.evidence.map(evidence=>evidence.section)));for(const evidence of analysis.candidateEvidence)if(usedSections.has(evidence.sourceSection)&&evidence.metadata?.knowledgeFactKey)unifiedStore.candidateFacts.markUsed(evidence.metadata.knowledgeFactKey,{consumer:"MATCHER",contextId:input.job?.id||analysis.id});return analysis;};
-const eventBus=new EventBus({outbox:unifiedStore.outbox});
+const initialIntegrationSettings=unifiedStore.integrationSettings.get();
+if(runtimePolicy.backgroundEnabled&&(!initialIntegrationSettings.enabled||!initialIntegrationSettings.configured))unifiedStore.outbox.failPending("INTEGRATION_NOT_CONFIGURED");
+const eventBus=new EventBus({outbox:unifiedStore.outbox,shouldPersist:event=>{if(!runtimePolicy.backgroundEnabled)return false;if(event.type==="INTEGRATION_TEST")return true;const settings=unifiedStore.integrationSettings.get();return settings.enabled&&settings.configured&&settings.eventAllowlist.includes(event.type);}});
 const linkedinCache=new LinkedInContentCache(unifiedStore.database.connection);
 const linkedinEnrichment=new LinkedInEnrichmentService({cache:linkedinCache,client:id=>callCareerEngine(`/jobs/linkedin/${id}/description`,{},8000)});
 const providerRegistry=createProviderRegistry({checkpointRepository:unifiedStore.discoveryProviderCheckpoints,searchClient:async input=>{const started=Date.now();const result=await callCareerEngine("/jobs/search",{query:String(input.query||""),location:String(input.location||defaultCountry),country:String(input.country||defaultCountry),geography_surface:String(input.geographySurface||""),sites:input.sites,results_wanted:input.limit||input.resultsWanted||20,hours_old:input.hoursOld||null,remote:Boolean(input.remote),portal_deadline_ms:discoveryTimeouts.portalDeadlineMs,engine_deadline_ms:discoveryTimeouts.engineDeadlineMs},discoveryTimeouts.transportDeadlineMs);const enriched=await linkedinEnrichment.enrich(result.jobs||[],{budgetMs:Math.max(0,Math.min(15000,discoveryTimeouts.transportDeadlineMs-(Date.now()-started)-1000))});for(const report of result.sourceReports||[])if(report.source==="linkedin")report.enrichment=enriched.metrics;return {...result,jobs:enriched.jobs};}});
@@ -170,7 +184,7 @@ let answerDrafter=new ApplicationAnswerDrafter(intelligenceService);
 let resumeTailor=new ResumeTailor(intelligenceService);
 let coverLetterGenerator=new CoverLetterGenerator(intelligenceService);
 const resumeSelector=new ResumeSelector();
-const jobHuntService=new JobHuntService({store:unifiedStore,discoveryService,matcher:runCareerMatcher,profileProvider:readProfile,eventBus,prepareResume:async({job,resume,analysis})=>{
+const jobHuntService=new JobHuntService({store:unifiedStore,discoveryService,matcher:runCareerMatcher,profileProvider:readProfile,eventBus,reviewOnly:runtimePolicy.manual,prepareResume:async({job,resume,analysis})=>{
   const reusable=unifiedStore.resumeVersions.list({jobId:job.id,status:"READY"}).find(version=>version.resumeId===resume.id&&version.tailoringRunId&&unifiedStore.resumeTailoring.findRun(version.tailoringRunId)?.analysisId===analysis.id&&unifiedStore.resumeArtifacts.latest(version.id,"PDF")?.status==="READY");
   if(reusable)return {id:reusable.id,resumeVersionId:reusable.id,tailoringRunId:reusable.tailoringRunId,status:"READY",kind:"VERSION",reused:true};
   const profile=await readProfile(),result=await resumeTailor.tailor({job,requirements:analysis.requirements||[],resume:{...resume,sections:resume.sections||{}},evidence:analysis.candidateEvidence||[],originalScore:analysis.overallScore,scoreEvaluator:tailored=>runCareerMatcher({job,profile,resume:tailored}).overallScore}),run=unifiedStore.resumeTailoring.createRun({jobId:job.id,resumeId:resume.id,analysisId:analysis.id,state:"REVIEW_REQUIRED",originalScore:result.originalScore,tailoredScore:result.tailoredScore,evidenceStatus:result.evidenceStatus,promptVersion:result.promptVersion,schemaVersion:result.schemaVersion,quality:result.quality,changes:result.changes});
@@ -181,7 +195,7 @@ const jobHuntService=new JobHuntService({store:unifiedStore,discoveryService,mat
   const rendered=await resumeService.render(draft.id),version=unifiedStore.resumeVersions.findById(draft.id),pdf=unifiedStore.resumeArtifacts.latest(draft.id,"PDF");
   if(version?.status!=="READY"||pdf?.status!=="READY")return {id:draft.id,resumeVersionId:draft.id,tailoringRunId:run.id,status:"REVIEW_REQUIRED",kind:"VERSION",rendered};
   return {id:version.id,resumeVersionId:version.id,tailoringRunId:run.id,status:"READY",kind:"VERSION"};
-},requestApproval:({job,resumeVersionId})=>resumeApprovalDispatcher.dispatch({jobId:job.id,resumeVersionId})});
+},requestApproval:({job,resumeVersionId,allowWhatsApp=true})=>resumeApprovalDispatcher.dispatch({jobId:job.id,resumeVersionId,allowWhatsApp:runtimePolicy.backgroundEnabled&&allowWhatsApp,reviewOnly:runtimePolicy.manual})});
 const credentialVault=await new CredentialVault({vaultPath:path.join(hubDataDir,"source-credentials.vault.json")}).initialize();
 let sourceConnectionService;
 const publicWebProvider=new BraveSearchProvider({apiKeyProvider:()=>sourceConnectionService?.secret("brave-public-web")||""});
@@ -193,7 +207,7 @@ const companyRecommendationService=new CompanyRecommendationService({store:unifi
 const communityDiscoveryService=new CommunityDiscoveryService({repository:unifiedStore.discoveryV4,jobRepository:unifiedStore.jobs});
 const leadPromotionService=new LeadPromotionService({repository:unifiedStore.discoveryV4,jobRepository:unifiedStore.jobs});
 const discoveryV4Service=new DiscoveryV4Service({searchIntentService,publicWeb:publicWebProvider,repository:unifiedStore.discoveryV4,jobHuntService,evolutionService:evolutionConnectionService,communityService:communityDiscoveryService,store:unifiedStore,careerPageDiscovery});
-const linkedinResolver=new LinkedInAmbiguityResolver({cache:linkedinCache,modelIdentity:()=>{const settings=intelligenceService.settings;try{const url=new URL(settings.endpoint);if(!["http:","https:"].includes(url.protocol)||url.username||url.password||!["localhost","127.0.0.1","[::1]","host.docker.internal"].includes(url.hostname))return "";}catch{return "";}return [settings.fastModel,settings.balancedModel,settings.qualityModel].some(Boolean)?JSON.stringify([settings.endpoint,settings.fastModel,settings.balancedModel,settings.qualityModel]):"";},resolve:(text,onProviderCall)=>intelligenceService.execute("LINKEDIN_OPPORTUNITY_CLASSIFICATION",{text,instruction:"Classifique somente se o texto representa uma vaga. Campos extraídos devem ser trechos literais do texto ou null. Não avalie o candidato."},{cache:false,onProviderCall})});
+const linkedinResolver=new LinkedInAmbiguityResolver({cache:linkedinCache,modelIdentity:()=>{const settings=intelligenceService.settings;try{approvedLlmEndpoint(settings.endpoint);}catch{return "";}return [settings.fastModel,settings.balancedModel,settings.qualityModel].some(Boolean)?JSON.stringify([settings.endpoint,settings.fastModel,settings.balancedModel,settings.qualityModel]):"";},resolve:(text,onProviderCall)=>intelligenceService.execute("LINKEDIN_OPPORTUNITY_CLASSIFICATION",{text,instruction:"Classifique somente se o texto representa uma vaga. Campos extraídos devem ser trechos literais do texto ou null. Não avalie o candidato."},{cache:false,onProviderCall})});
 discoveryV4Service.linkedinResolver=linkedinResolver;
 providerRegistry.get("jobspy").linkedinResolver=linkedinResolver;
 const runtimeCapabilityService=new RuntimeCapabilityService({discoveryV4:discoveryV4Service,evolutionService:evolutionConnectionService,providerTestService,intelligenceStatus:()=>intelligenceService.status(),careerEngineUrl,integrationSettings:unifiedStore.integrationSettings});
@@ -209,7 +223,7 @@ const applicationEngine = new ApplicationEngine({
   headless: automationHeadless,
   questionClassifier
 });
-const submissionEnabled=process.env.NODE_ENV==="production"&&String(process.env.CAREER_SUBMISSION_ENABLED||"false").toLowerCase()==="true";
+const submissionEnabled=submissionRuntimeEnabled();
 const submissionBrowserManager=applicationEngine.browser;
 const greenhouseFinalRevalidator=new GreenhouseFinalRevalidator({store:unifiedStore,dataDir:hubDataDir,registry:applicationEngine.registry,browserManager:submissionBrowserManager});
 const leverFinalRevalidator=new LeverFinalRevalidator({store:unifiedStore,dataDir:hubDataDir,registry:applicationEngine.registry,browserManager:submissionBrowserManager});
@@ -219,7 +233,7 @@ const workableFinalRevalidator=new WorkableFinalRevalidator({store:unifiedStore,
 const nerdinFinalRevalidator=new NerdinFinalRevalidator({store:unifiedStore,dataDir:hubDataDir,registry:applicationEngine.registry,browserManager:submissionBrowserManager});
 const teamtailorFinalRevalidator=new TeamtailorFinalRevalidator({store:unifiedStore,dataDir:hubDataDir,registry:applicationEngine.registry,browserManager:submissionBrowserManager});
 const finalRevalidator=new FinalRevalidatorRouter({store:unifiedStore,browserManager:submissionBrowserManager,revalidators:{greenhouse:greenhouseFinalRevalidator,lever:leverFinalRevalidator,ashby:ashbyFinalRevalidator,smartrecruiters:smartRecruitersFinalRevalidator,workable:workableFinalRevalidator,nerdin:nerdinFinalRevalidator,teamtailor:teamtailorFinalRevalidator}});
-const submissionTransport=new AdapterSubmissionTransport({registry:applicationEngine.registry,revalidator:finalRevalidator,allowExternal:submissionEnabled,allowLocalFixtures:false});
+const submissionTransport=new AdapterSubmissionTransport({store:unifiedStore,registry:applicationEngine.registry,revalidator:finalRevalidator,allowExternal:submissionEnabled,allowLocalFixtures:false});
 const submissionPreflight=new SubmissionPreflight({store:unifiedStore,dataDir:hubDataDir,registry:applicationEngine.registry,revalidator:finalRevalidator,policy:{submissionEnabled}});
 const submissionConsentService=new SubmissionConsentService({store:unifiedStore});
 const controlledSubmissionService=new ControlledSubmissionService({store:unifiedStore,preflight:submissionPreflight,transport:submissionTransport});
@@ -234,7 +248,7 @@ function answerDraftContext(applicationId,questionId){
   return {application,question,pending};
 }
 const intelligenceWorker=new IntelligenceWorker({repository:unifiedStore.intelligenceJobs,concurrency:1,handlers:{
-  [TASK_TYPES.RESUME_TAILORING]:async payload=>{const job=unifiedStore.jobs.findById(payload.jobId),resume=unifiedStore.resumes.findById(payload.resumeId),analysis=payload.analysisId?unifiedStore.analyses.findById(payload.analysisId):unifiedStore.analyses.all().find(x=>x.jobId===payload.jobId&&x.resumeId===payload.resumeId);if(!job||!resume)throw Object.assign(new Error("Vaga ou curriculo nao encontrado."),{code:"INTELLIGENCE_INPUT_NOT_FOUND"});const profile=await readProfile();const result=await resumeTailor.tailor({job,requirements:analysis?.requirements||[],resume:{...resume,sections:resume.sections||{}},evidence:analysis?.candidateEvidence||[],originalScore:analysis?.overallScore??analysis?.score??null,scoreEvaluator:tailored=>runCareerMatcher({job,profile,resume:tailored}).overallScore,userInstruction:String(payload.instruction||"").slice(0,800)}),run=unifiedStore.resumeTailoring.createRun({jobId:job.id,resumeId:resume.id,analysisId:analysis?.id,state:"REVIEW_REQUIRED",originalScore:result.originalScore,tailoredScore:result.tailoredScore,evidenceStatus:result.evidenceStatus,promptVersion:result.promptVersion,schemaVersion:result.schemaVersion,quality:result.quality,changes:result.changes});eventBus.emit("RESUME_TAILORING_REVIEW_REQUIRED",{resumeId:resume.id,jobId:job.id,applicationId:payload.applicationId||"",approvalRequestId:payload.approvalRequestId||"",tailoringRunId:run.id,atsBefore:run.originalScore,atsAfter:run.tailoredScore});return run;},
+  [TASK_TYPES.RESUME_TAILORING]:async payload=>{const job=unifiedStore.jobs.findById(payload.jobId),resume=unifiedStore.resumes.findById(payload.resumeId),analysis=payload.analysisId?unifiedStore.analyses.findById(payload.analysisId):unifiedStore.analyses.all().find(x=>x.jobId===payload.jobId&&x.resumeId===payload.resumeId);if(!job||!resume)throw Object.assign(new Error("Vaga ou curriculo nao encontrado."),{code:"INTELLIGENCE_INPUT_NOT_FOUND"});const profile=await readProfile();const result=await resumeTailor.tailor({job,requirements:analysis?.requirements||[],resume:{...resume,sections:resume.sections||{}},evidence:analysis?.candidateEvidence||[],originalScore:analysis?.overallScore??analysis?.score??null,scoreEvaluator:tailored=>runCareerMatcher({job,profile,resume:tailored}).overallScore,userInstruction:String(payload.instruction||"").slice(0,800)}),run=unifiedStore.resumeTailoring.createRun({jobId:job.id,resumeId:resume.id,analysisId:analysis?.id,state:"REVIEW_REQUIRED",originalScore:result.originalScore,tailoredScore:result.tailoredScore,evidenceStatus:result.evidenceStatus,promptVersion:result.promptVersion,schemaVersion:result.schemaVersion,quality:result.quality,changes:result.changes});eventBus.emit("RESUME_TAILORING_REVIEW_REQUIRED",{resumeId:resume.id,jobId:job.id,applicationId:payload.applicationId||"",approvalRequestId:payload.approvalRequestId||"",tailoringRunId:run.id,atsBefore:run.originalScore,atsAfter:run.tailoredScore,generationMode:result.meta?.generationMode||"UNKNOWN",providerFallback:result.meta?.fallback===true,qualityStatus:result.quality?.status||"UNKNOWN"});return run;},
   [TASK_TYPES.APPLICATION_ANSWER_DRAFT]:async payload=>{const {application,question,pending}=answerDraftContext(payload.applicationId,payload.questionId);if(pending)return pending;const job=unifiedStore.jobs.findById(application.jobId),plan=unifiedStore.applicationPlans.forApplication(application.id),analysis=plan?.analysisId?unifiedStore.analyses.findById(plan.analysisId):null;const result=await answerDrafter.draft({question:{label:question.label,description:question.helpText||question.reasonRequired||"",type:question.fieldType},job,requirements:analysis?.requirements||[],evidence:analysis?.candidateEvidence||[]});if(result.evidenceStatus!=="VALID")throw Object.assign(new Error("Draft violou evidencias permitidas."),{code:"EVIDENCE_VIOLATION"});return unifiedStore.generatedContent.create({applicationId:application.id,questionId:question.id,contentType:"ANSWER_DRAFT",state:"REVIEW_REQUIRED",draft:result.draft,evidenceIds:result.evidenceIds,promptVersion:result.promptVersion,schemaVersion:result.schemaVersion});},
   [TASK_TYPES.COVER_LETTER]:async payload=>{const application=unifiedStore.applications.findById(payload.applicationId);if(!application)throw Object.assign(new Error("Candidatura nao encontrada."),{code:"INTELLIGENCE_INPUT_NOT_FOUND"});const job=unifiedStore.jobs.findById(application.jobId),plan=unifiedStore.applicationPlans.forApplication(application.id),analysis=plan?.analysisId?unifiedStore.analyses.findById(plan.analysisId):null;const result=await coverLetterGenerator.generate({requested:true,job,evidence:analysis?.candidateEvidence||[]});if(result.evidenceStatus!=="VALID")throw Object.assign(new Error("Cover letter violou evidencias permitidas."),{code:"EVIDENCE_VIOLATION"});const item=unifiedStore.generatedContent.create({applicationId:application.id,contentType:"COVER_LETTER",state:"REVIEW_REQUIRED",draft:result.draft,evidenceIds:result.evidenceIds,promptVersion:result.promptVersion,schemaVersion:result.schemaVersion});eventBus.emit("COVER_LETTER_READY",{applicationId:application.id,jobId:application.jobId});return item;}
 }});
@@ -2364,28 +2378,52 @@ function contentType(file) {
 }
 
 const opportunityService=new OpportunityService({store:unifiedStore,profileProvider:readProfile,revisionCheckIntervalMs:30_000});
+if(runtimePolicy.backgroundEnabled)void opportunityService.list().catch(error=>unifiedStore.structuredLogs.record({category:"OPPORTUNITIES",eventCode:"PROJECTION_WARMUP_FAILED",status:"DEGRADED",level:"WARN",errorCode:error.code||"OPPORTUNITY_PROJECTION_FAILED",message:"A projeção inicial será reconstruída no primeiro acesso."}));
 discoveryV4Service.capabilities();
 const {ApplicationBatchService}=await import("./src/application/application-batch-service.mjs");
 const {createApplicationBatchRoutes}=await import("./server/routes/application-batch-routes.mjs");
 const {SourceAuthService}=await import('./src/source-connections/source-auth-service.mjs');
+const {SESSION_PROVIDER_IDS}=await import('./src/source-connections/session-provider-registry.mjs');
 const {SourceReadinessService}=await import('./src/source-connections/provider-readiness.mjs');
 const {ObservabilityService}=await import('./src/observability/observability-service.mjs');
 const {createConnectionsObservabilityRoutes}=await import('./server/routes/connections-observability-routes.mjs');
 const sourceAuth=new SourceAuthService({store:unifiedStore,vault:credentialVault,connections:sourceConnectionService,githubEvidence:githubEvidenceProvider});
+const {createAutomationSessionProvider}=await import('./src/source-connections/automation-session-provider.mjs');
+const automationSessionProvider=createAutomationSessionProvider(sourceAuth);
+applicationEngine.sessionStateProvider=automationSessionProvider;
+for(const revalidator of [ashbyFinalRevalidator,smartRecruitersFinalRevalidator,workableFinalRevalidator,nerdinFinalRevalidator,teamtailorFinalRevalidator])revalidator.sessionStateProvider=automationSessionProvider;
+const verifyActivePortalSessions=async()=>{
+  for(const provider of SESSION_PROVIDER_IDS){
+    if(sourceAuth.status(provider).status!=="SESSION_ACTIVE")continue;
+    await sourceAuth.check(provider).catch(error=>unifiedStore.structuredLogs.record({category:"SOURCE_AUTH",provider,eventCode:"SILENT_SESSION_CHECK_FAILED",status:"DEGRADED",level:"WARN",errorCode:error.code||"SESSION_CHECK_FAILED",message:error.message}));
+  }
+};
 const sourceReadiness=new SourceReadinessService({connections:sourceConnectionService,auth:sourceAuth,submissionEnabled});
 const observability=new ObservabilityService({store:unifiedStore,readiness:sourceReadiness});
 const applicationBatchService=new ApplicationBatchService({store:unifiedStore,dataDir:hubDataDir,profileProvider:readProfile,opportunityService,headless:automationHeadless,submissionEnabled,sourceReadiness,sourceAuth});
-const applicationQuestionEscalation=new ApplicationQuestionEscalationService({store:unifiedStore,approvalGateway:whatsappApprovalGateway,answerDrafterProvider:()=>answerDrafter});
-const autoApplyOrchestrator=new AutoApplyOrchestrator({store:unifiedStore,profileProvider:readProfile,applicationEngine,applicationBatchService,submissionPreflight,consentService:submissionConsentService,controlledSubmission:controlledSubmissionService,submissionEnabled,resultHandler:(context,result)=>whatsappApprovalGateway.notifyAutoApplyResult(context,result),questionEscalation:applicationQuestionEscalation});
+const applicationQuestionEscalation=new ApplicationQuestionEscalationService({store:unifiedStore,approvalGateway:whatsappApprovalGateway,answerDrafterProvider:()=>answerDrafter,notificationsEnabled:runtimePolicy.backgroundEnabled});
+const autoApplyOrchestrator=new AutoApplyOrchestrator({store:unifiedStore,profileProvider:readProfile,applicationEngine,applicationBatchService,submissionPreflight,consentService:submissionConsentService,controlledSubmission:controlledSubmissionService,submissionEnabled,manualSince:runtimePolicy.queueSince,resultHandler:runtimePolicy.backgroundEnabled?(context,result)=>whatsappApprovalGateway.notifyAutoApplyResult(context,result):null,questionEscalation:applicationQuestionEscalation,availabilityService:opportunityAvailabilityService});
+const delayedQuestions=new DelayedQuestionService({store:unifiedStore,approvalGateway:whatsappApprovalGateway,drafterProvider:()=>answerDrafter,routing:application=>autoApplyOrchestrator.automaticRouting(application),researchProvider:publicWebProvider,
+  modelProvider:async configured=>selectQuestionModel(await intelligenceService.provider.listModels(),configured)});
+applicationQuestionEscalation.delayedQuestions=delayedQuestions;
+intelligenceWorker.handlers[DELAYED_QUESTION_TASK]=payload=>delayedQuestions.execute(payload);
 whatsappApprovalGateway.approvalHandler=context=>autoApplyOrchestrator.start(context);
-whatsappApprovalGateway.revisionHandler=({request,application,observation})=>{const version=unifiedStore.resumeVersions.findById(request.resumeVersionId);if(!version||version.resumeId!==application.resumeId)throw Object.assign(new Error("Currículo da aprovação não encontrado."),{code:"WHATSAPP_REVISION_CONTEXT_INVALID",status:409});const payload={jobId:request.jobId,resumeId:version.resumeId,applicationId:application.id,approvalRequestId:request.id,instruction:String(observation||"").slice(0,800),questionId:randomUUID()};const job=unifiedStore.intelligenceJobs.enqueue(TASK_TYPES.RESUME_TAILORING,payload);intelligenceWorker.schedule();return {status:"QUEUED",jobId:job.id};};
+whatsappApprovalGateway.revisionHandler=({request,application,observation})=>{const version=unifiedStore.resumeVersions.findById(request.resumeVersionId);if(!version||version.resumeId!==application.resumeId)throw Object.assign(new Error("Currículo da aprovação não encontrado."),{code:"WHATSAPP_REVISION_CONTEXT_INVALID",status:409});const payload={jobId:request.jobId,resumeId:version.resumeId,applicationId:application.id,approvalRequestId:request.id,instruction:String(observation||"").slice(0,800),questionId:createHash("sha256").update(`${request.id}:${observation}`).digest("hex")};const job=unifiedStore.intelligenceJobs.enqueue(TASK_TYPES.RESUME_TAILORING,payload);intelligenceWorker.schedule();return {status:"QUEUED",jobId:job.id};};
 whatsappApprovalGateway.rejectionHandler=({request})=>resumeService.archive(request.resumeVersionId);
 whatsappApprovalGateway.questionAnswerHandler=({application,question,answer})=>unifiedStore.answerApplicationQuestion(application.id,question.id,answer,{reusable:false});
-whatsappApprovalGateway.questionResumeHandler=({request,application})=>autoApplyOrchestrator.start({request:{id:`whatsapp-question:${request.id}`,source:"WHATSAPP_QUESTION"},application});
+whatsappApprovalGateway.questionResumeHandler=({request,application})=>{
+  const pending=unifiedStore.applicationQuestions.forApplication(application.id).some(question=>question.required&&question.answerStatus==="USER_REQUIRED");
+  return pending?applicationQuestionEscalation.escalate(application.id):{status:"QUEUED"};
+};
+whatsappApprovalGateway.handoffResumeHandler=({application,token,approvalRequest,commandHash})=>autoApplyOrchestrator.start({request:{id:`whatsapp-handoff:${application.id}:${commandHash||token}`,source:"WHATSAPP_HANDOFF",...(approvalRequest?{approvalRequestId:approvalRequest.id}:{})},application});
 resumeApprovalDispatcher.autoApplyHandler=context=>autoApplyOrchestrator.start(context);
+if(runtimePolicy.backgroundEnabled){
 resumeBatchService.attachReadyDispatcher(input=>resumeApprovalDispatcher.dispatch(input));
 for(const eventType of ["RESUME_VERSION_APPROVED","RESUME_RENDER_READY"])
   eventBus.on(eventType,event=>{
+    const version=unifiedStore.resumeVersions.findById(event.payload?.resumeVersionId||"");
+    // Mass Hunt owns its notification budget, quiet hours and pause boundary.
+    if(version?.source==="MASS_HUNT_AUTOAPPLY")return;
     void resumeApprovalDispatcher.dispatch(event.payload).catch(error=>
       unifiedStore.structuredLogs.record({
         category:"APPLICATION_AUTOMATION",
@@ -2411,19 +2449,31 @@ sourceAuth.onAuthenticated=async (provider,tenant)=>{
 sourceAuth.onDisconnected=async provider=>{if(provider!=='gupy')return;for(const session of [...applicationBatchService.browser.activeSessions])await applicationBatchService.browser.close(session,{traceStopped:true});};
 const logRetentionTimer=setInterval(()=>unifiedStore.structuredLogs.prune(),3600000);logRetentionTimer.unref();
 unifiedStore.structuredLogs.record({category:'SYSTEM',eventCode:'RUNTIME_READY',message:'Connections and diagnostics initialized',metadata:{schemaVersion:27,submissionEnabled}});
-applicationBatchService.worker=new BoundedStageWorker({repository:unifiedStore.applicationBatches,status:"PREPARING",concurrency:2,handler:async item=>{
+}
+if(runtimePolicy.workersEnabled){
+applicationBatchService.worker=new BoundedStageWorker({repository:unifiedStore.applicationBatches,status:"PREPARING",concurrency:2,claimOptions:{since:runtimePolicy.queueSince},handler:async item=>{
   await applicationBatchService.prepare(item);
   const prepared=unifiedStore.applicationBatches.findItem(item.id);
   if(prepared?.status==="READY_TO_SUBMIT"&&prepared.approvalRequestId&&submissionEnabled)await applicationBatchService.submit(prepared.id,{confirmed:true,idempotencyKey:`whatsapp-autoapply:${prepared.approvalRequestId}:gupy`});
   return unifiedStore.applicationBatches.findItem(item.id);
 }}).start();
+if(runtimePolicy.backgroundEnabled){
 const applicationPreparationTimer=setInterval(()=>applicationBatchService.prepareEligible().catch(()=>{}),60000);
 applicationPreparationTimer.unref();
-resumeDocumentWorker.start();
-intelligenceWorker.start();
-Object.values(batchWorkers).forEach(worker=>worker.start());
+}
+for(const worker of [resumeDocumentWorker,intelligenceWorker,...Object.values(batchWorkers)]){
+  worker.claimOptions={since:runtimePolicy.queueSince};
+  worker.start();
+}
+}
 const decisionInbox=new DecisionInboxService({store:unifiedStore,opportunityService,weeklyTechRadar:new WeeklyTechRadarService()});
 const dailyRefreshService=new DailyRefreshService({store:unifiedStore,jobHuntService,opportunityService,availabilityService:opportunityAvailabilityService,decisionInbox});
+const availabilityScheduler=new AvailabilityScheduler({store:unifiedStore,refreshService:dailyRefreshService});
+opportunityAvailabilityService.onChange=()=>{opportunityService.invalidate();decisionInbox.scheduleRebuild();};
+whatsappApprovalGateway.feedbackChanged=()=>{opportunityService.invalidate();decisionInbox.scheduleRebuild();};
+whatsappApprovalGateway.processCommands.availabilityService=opportunityAvailabilityService;
+whatsappApprovalGateway.processCommands.onChange=whatsappApprovalGateway.feedbackChanged;
+whatsappApprovalGateway.cancelHandler=async applicationId=>{for(const session of applicationEngine.browser.activeSessions||[])if(session.applicationId===applicationId)await applicationEngine.browser.close(session);};
 const atsRecalculationService=new AtsRecalculationService({store:unifiedStore,reanalyze:analyzeUnifiedAts});
 const qualityLabelService=new QualityLabelService({dataDir:hubDataDir});
 const coverageBenchmarkService=new CoverageBenchmarkService({repository:unifiedStore.coverageBenchmark,store:unifiedStore,discoveryService,jobHuntService,opportunityService});
@@ -2437,7 +2487,7 @@ const extractedRouteHandlers=[
   createAtsRoutes({recalculationService:atsRecalculationService,readJson:readRequestJson,json,sendError}),
   createQualityLabRoutes({service:qualityLabelService,readJson:readRequestJson,json,sendError}),
   createCoverageBenchmarkRoutes({service:coverageBenchmarkService,readJson:readRequestJson,json,sendError}),
-  createOpportunityRoutes({store:unifiedStore,opportunityService,availabilityService:opportunityAvailabilityService,dailyRefreshService,decisionInbox,readJson:readRequestJson,json,sendError}),
+  createOpportunityRoutes({store:unifiedStore,opportunityService,availabilityService:opportunityAvailabilityService,dailyRefreshService,availabilityScheduler,decisionInbox,readJson:readRequestJson,json,sendError}),
   createExperienceRoutes({experienceService,profileProvider:readProfile,readJson:readRequestJson,json,sendError}),
   createCandidateKnowledgeRoutes({store:unifiedStore,githubEvidenceProvider,githubRecalibration:new GitHubRecalibrationService({store:unifiedStore,matcher:runCareerMatcher,profileProvider:readProfile,opportunities:opportunityService}),readJson:readRequestJson,json,sendError}),
   createSourceRoutes({store:unifiedStore,providerTestService,sourceConnectionService,companyRecommendations:companyRecommendationService,opportunityService,readJson:readRequestJson,json,sendError}),
@@ -2448,7 +2498,17 @@ const extractedRouteHandlers=[
 ];
 
 const server = createServer(async (req, res) => {
-  const url = new URL(req.url || "/", `http://${req.headers.host}`);
+  if(req.url==="/api/health"&&req.method==="GET"){
+    json(res,{ok:true,mode:runtimePolicy.mode});return;
+  }
+  try{authorizeWebRequest(req,webConfig);}catch(error){sendError(res,error,{status:error.status||403,code:error.code,message:error.message});return;}
+  const url = new URL(req.url || "/", webConfig.enabled?webConfig.origin:`http://${req.headers.host}`);
+  if(url.pathname==="/api/runtime"&&req.method==="GET"){
+    json(res,{ok:true,mode:runtimePolicy.mode,backgroundEnabled:runtimePolicy.backgroundEnabled,workersEnabled:runtimePolicy.workersEnabled,submissionEnabled,sessionRenewalEnabled:true});return;
+  }
+  if(!runtimePolicy.allowRequest(req.method,url.pathname)){
+    json(res,{ok:false,code:runtimePolicy.manual?"MANUAL_MODE_API_RESTRICTED":"MAINTENANCE_MODE",error:runtimePolicy.manual?"Modo manual: use os comandos do aplicativo mobile. Agendas e integracoes automaticas permanecem pausadas.":"Sistema em manutencao: agendas, filas e envios pausados. A renovacao manual de Cofres esta disponivel."},423);return;
+  }
   if(url.pathname.startsWith('/api/')&&!url.pathname.startsWith('/api/observability')){
     const started=Date.now();const correlationId=`http-${randomUUID()}`;res.setHeader('X-Correlation-Id',correlationId);
     res.once('finish',()=>{if(req.method!=='GET'||res.statusCode>=400)unifiedStore.structuredLogs.record({category:res.statusCode===403?'SECURITY':'HTTP',eventCode:res.statusCode>=400?'HTTP_OPERATION_FAILED':'HTTP_OPERATION_COMPLETED',level:res.statusCode>=500?'ERROR':res.statusCode>=400?'WARN':'INFO',correlationId:res.getHeader('X-Correlation-Id')||correlationId,operation:req.method,status:String(res.statusCode),durationMs:Date.now()-started,errorCode:res.statusCode>=400?`HTTP_${res.statusCode}`:'',message:url.pathname.replace(/\/handoff\/[^/]+/,'/handoff/[request]')});});
@@ -2933,7 +2993,7 @@ const server = createServer(async (req, res) => {
     return;
   }
 
-const deepLink = url.pathname === "/analyze" || /^\/(opportunities|resumes|resume-batches|application-batches|applications|autopilot|knowledge|settings|connections|vaults|observability|quality-lab)(\/|$)/.test(url.pathname);
+const deepLink = url.pathname === "/analyze" || /^\/(opportunities|processes|resumes|resume-batches|application-batches|applications|autopilot|knowledge|settings|connections|vaults|observability|quality-lab)(\/|$)/.test(url.pathname);
   const requested = url.pathname === "/" || deepLink ? "index.html" : url.pathname.slice(1);
   const file = path.normalize(path.join(publicDir, requested));
   if (!file.startsWith(publicDir)) {
@@ -2955,8 +3015,58 @@ server.listen(port, host, () => {
   console.log(`Job Search Hub em http://${host}:${port} (SQLite: ${unifiedDatabasePath})`);
 });
 
+const mobileConfig = mobileGatewayConfig();
+if (mobileConfig.enabled) {
+  const mobileGateway = createMobileGateway({
+    config: mobileConfig,
+    readOnly: runtimePolicy.maintenance,
+    operationMode: runtimePolicy.mode,
+    sourceReadiness: () => sourceReadiness.list(),
+    store: unifiedStore,
+    jobHuntService,
+    decisionInbox,
+    opportunityService,
+    experienceService,
+    eventBus,
+    applicationActions: {
+      analyze: async ({applicationId}) => ({ applicationId, url: `/applications/${encodeURIComponent(applicationId)}` }),
+      approve: async ({applicationId,resumeVersionId,idempotencyKey,identity}) => {
+        const application=unifiedStore.applications.findById(applicationId);
+        if(!application)throw Object.assign(new Error("Candidatura nao encontrada."),{code:"APPLICATION_NOT_FOUND",status:404});
+        return unifiedStore.applicationDecisionService.decide({applicationId,resumeVersionId:resumeVersionId||application.resumeVersionId,decision:"APPROVE",mode:"AUTO_APPLY",actor:identity.login,channel:"MOBILE",idempotencyKey});
+      },
+      resume: async ({applicationId,resumeVersionId,idempotencyKey,identity}) => {
+        const application=unifiedStore.applications.findById(applicationId),decision=application&&unifiedStore.applicationDecisions.latest(applicationId,application.resumeVersionId);
+        if(!application||resumeVersionId&&resumeVersionId!==application.resumeVersionId||!decision||!unifiedStore.applicationDecisionService.isCurrent(decision))throw Object.assign(new Error("Revise e aprove a versao atual antes de retomar."),{code:"DECISION_CONTEXT_STALE",status:409});
+        unifiedStore.database.transaction(()=>unifiedStore.applicationDecisionService.enqueue(decision,null,`resume:${createHash("sha256").update(idempotencyKey).digest("hex").slice(0,20)}`,{channel:"MOBILE"}));
+        return {status:"QUEUED",decisionId:decision.id};
+      },
+      reject: async ({applicationId,resumeVersionId,idempotencyKey,identity}) => {
+        const application=unifiedStore.applications.findById(applicationId);
+        if(!application)throw Object.assign(new Error("Candidatura nao encontrada."),{code:"APPLICATION_NOT_FOUND",status:404});
+        return unifiedStore.applicationDecisionService.decide({applicationId,resumeVersionId:resumeVersionId||application.resumeVersionId,decision:"REJECT",mode:"REVIEW_ONLY",actor:identity.login,channel:"MOBILE",idempotencyKey});
+      },
+      request_change: async ({applicationId,instruction}) => {const application=unifiedStore.applications.findById(applicationId);if(!application?.resumeVersionId||!instruction)throw Object.assign(new Error("Informe a alteração desejada."),{code:"REVISION_INSTRUCTION_REQUIRED",status:400});const job=unifiedStore.intelligenceJobs.enqueue(TASK_TYPES.RESUME_TAILORING,{jobId:application.jobId,resumeId:application.resumeId,applicationId,instruction,questionId:randomUUID()});intelligenceWorker.schedule();return {status:"QUEUED",jobId:job.id};},
+      answer: async ({applicationId,questionId,answer,resumeVersionId,fingerprint,idempotencyKey,identity}) => unifiedStore.applicationDecisionService.answer({applicationId,questionId,answer,resumeVersionId,fingerprint,idempotencyKey,actor:identity.login,channel:"MOBILE"}),
+    },
+  });
+  mobileGateway.listen(mobileConfig.port, mobileConfig.host, () => {
+    console.log(
+      `Mobile Gateway em http://${mobileConfig.host}:${mobileConfig.port} (Tailscale Serve obrigatório)`,
+    );
+  });
+}
+
+if(runtimePolicy.backgroundEnabled){
 const scheduledSearchTimer = setInterval(() => {
+  try{availabilityScheduler.tick();}catch(error){console.error("Verificação agendada falhou:",error.code||"VERIFICATION_SCHEDULER_FAILED");}
   jobHuntService.runDue().catch((error)=>console.error("Job Hunt agendado falhou:",error.message));
 }, 60000);
 scheduledSearchTimer.unref();
+const initialSessionCheckTimer=setTimeout(()=>void verifyActivePortalSessions(),60_000);initialSessionCheckTimer.unref();
+const sessionCheckTimer=setInterval(()=>void verifyActivePortalSessions(),24*60*60*1000);sessionCheckTimer.unref();
 const webhookTimer=setInterval(()=>webhookDispatcher.drainOne().catch(()=>null),5000);webhookTimer.unref();
+}
+if(runtimePolicy.workersEnabled){
+const autoApplyRecoveryTimer=setInterval(()=>autoApplyOrchestrator.resumePending().catch(error=>console.error("Retomada AutoApply falhou:",error.code||"AUTOAPPLY_RECOVERY_FAILED")),5000);autoApplyRecoveryTimer.unref();
+}

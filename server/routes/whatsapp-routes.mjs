@@ -1,4 +1,5 @@
 import {requireLocalJsonMutation} from "../local-mutation-guard.mjs";
+import {whatsappProcessDetail} from "../../src/integrations/evolution/whatsapp-process-read-model.mjs";
 
 export function createWhatsappRoutes({service,approvalGateway={publicConfiguration:()=>({configured:false}),publicRequest:value=>value},store,readJson,json,sendError,publicIntegrationSettings}){
   const check=async target=>{try{const response=await fetch(target,{signal:AbortSignal.timeout(2000)});return {online:response.ok,httpStatus:response.status};}catch(error){return {online:false,errorCode:error.name==="TimeoutError"?"TIMEOUT":"OFFLINE"};}};
@@ -7,6 +8,15 @@ export function createWhatsappRoutes({service,approvalGateway={publicConfigurati
     if(url.pathname==="/api/whatsapp/approvals/latest"&&req.method==="GET"){json(res,{ok:true,request:approvalGateway.publicRequest(store.whatsappApprovals.latest())});return true;}
     if(url.pathname==="/api/whatsapp/questions/active"&&req.method==="GET"){const applicationId=String(url.searchParams.get("applicationId")||"").slice(0,200);json(res,{ok:true,request:applicationId?approvalGateway.publicQuestionRequest(store.whatsappQuestions.active(applicationId)):null});return true;}
     try{
+      if(url.pathname==="/api/whatsapp/processes"&&req.method==="GET"){
+        const data=store.whatsappProcesses.list({offset:url.searchParams.get("offset"),limit:url.searchParams.get("limit"),query:url.searchParams.get("query")||""});
+        json(res,{ok:true,...data,items:data.items.map(item=>({...item,feedback:store.jobFeedback.forJob(item.jobId),manualSent:store.applications.events(item.applicationId).some(event=>event.eventType==="WHATSAPP_MANUAL_SUBMISSION_REPORTED")}))});return true;
+      }
+      const process=url.pathname.match(/^\/api\/whatsapp\/processes\/([^/]+)$/);
+      if(process&&req.method==="GET"){
+        const detail=whatsappProcessDetail(store,decodeURIComponent(process[1]));
+        json(res,detail?{ok:true,process:detail}:{ok:false,code:"WHATSAPP_PROCESS_NOT_FOUND",error:"Processo não encontrado."},detail?200:404);return true;
+      }
       if(url.pathname==="/api/whatsapp/approvals/prepare"&&req.method==="POST"){requireLocalJsonMutation(req,url);const input=await readJson(req),result=approvalGateway.prepare(input);json(res,{ok:true,request:approvalGateway.publicRequest(result.request),application:result.application,message:result.message},201);return true;}
       const approvalSend=url.pathname.match(/^\/api\/whatsapp\/approvals\/([^/]+)\/send$/);if(approvalSend&&req.method==="POST"){requireLocalJsonMutation(req,url);const input=await readJson(req),result=await approvalGateway.send(decodeURIComponent(approvalSend[1]),String(input.confirmation||""));json(res,{ok:true,request:approvalGateway.publicRequest(result.request),sent:result.sent});return true;}
       if(url.pathname==="/api/whatsapp/instance"&&req.method==="POST"){json(res,{ok:true,...await service.ensureInstance()},201);return true;}

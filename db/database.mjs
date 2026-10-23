@@ -1,4 +1,5 @@
 import { readdir, readFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
@@ -7,10 +8,11 @@ import { DatabaseOwnerLease } from "./database-owner-lease.mjs";
 const defaultMigrationsDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "migrations");
 
 export class HubDatabase {
-  constructor(filePath, { migrationsDir = defaultMigrationsDir, ownerLease = false } = {}) {
+  constructor(filePath, { migrationsDir = defaultMigrationsDir, ownerLease = false, migrate = true } = {}) {
     this.filePath = filePath;
     this.migrationsDir = migrationsDir;
     this.connection = null;
+    this.migrate = migrate;
     this.transactionDepth = 0;
     this.ownerLease = ownerLease ? new DatabaseOwnerLease(filePath) : null;
     this.shutdownHandler = null;
@@ -26,10 +28,24 @@ export class HubDatabase {
   }
 
   async initialize() {
+    if (!this.migrate && !existsSync(this.filePath))
+      throw Object.assign(new Error("Banco existente obrigatorio em manutencao."), {code:"PERSISTENT_DATABASE_MISSING"});
     this.ownerLease?.acquire();
     try {
       this.connection = new DatabaseSync(this.filePath);
-      this.connection.exec("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;");
+      if (!this.migrate) {
+        if(!this.connection.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='schema_migrations'").get())
+          throw Object.assign(new Error("Schema existente obrigatorio em manutencao."),{code:"DATABASE_MIGRATION_REQUIRED"});
+        const files = (await readdir(this.migrationsDir)).filter(name => /^\d+_.+\.sql$/.test(name));
+        const applied = new Set(this.connection.prepare("SELECT version FROM schema_migrations").all().map(row => row.version));
+        const expected = new Set(files.map(name => Number(name.split("_", 1)[0])));
+        if ([...expected].some(version => !applied.has(version)) || [...applied].some(version => !expected.has(version)))
+          throw Object.assign(new Error("Migre uma copia aprovada antes de iniciar esta release."), {code:"DATABASE_MIGRATION_REQUIRED"});
+        this.connection.exec("PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;");
+        this.installShutdownHandlers();
+        return this;
+      }
+      this.connection.exec("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL; PRAGMA busy_timeout = 5000;");
     this.connection.exec(`
       CREATE TABLE IF NOT EXISTS schema_migrations (
         version INTEGER PRIMARY KEY,

@@ -43,7 +43,7 @@ export async function authenticatedProviderPage(page,providerId){
   if(await page.locator('input[type="password"]:visible').count())return false;
   if(await page.getByRole('button',{name:/^(sair|logout|log out)$/i}).count()||await page.getByRole('link',{name:/^(sair|logout|log out)$/i}).count())return true;
   if(provider.authenticatedPaths.some(pattern=>pattern.test(page.url())))return true;
-  for(const pattern of provider.authenticatedText)if(await page.getByText(pattern).count())return true;
+  for(const pattern of provider.authenticatedText){const matches=page.getByText(pattern);for(let index=0;index<await matches.count();index++)if(await matches.nth(index).isVisible())return true;}
   return false;
 }
 export async function authenticatedGupyPage(page,tenant){

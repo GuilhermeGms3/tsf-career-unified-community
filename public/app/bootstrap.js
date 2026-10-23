@@ -7,6 +7,7 @@ import {
   renderOpportunityWorkspace,
 } from "../features/opportunities/page.js";
 import { renderAutopilot } from "../features/autopilot/page.js";
+import { renderProcesses } from "../features/processes/page.js";
 import {
   renderResumes,
   renderResumeWorkspace,
@@ -42,6 +43,8 @@ const renderers = {
   "application-batch": renderApplicationBatches,
   "application-batches": renderApplicationBatches,
   applications: renderApplications,
+  processes: renderProcesses,
+  process: renderProcesses,
   application: renderApplicationWorkspace,
   knowledge: renderKnowledge,
   settings: renderSettings,
@@ -58,6 +61,18 @@ globalThis.__careerPerformance = routeMetrics;
 export function bootstrap() {
   renderNavigation();
   initTheme();
+  api("/api/runtime",{cache:false}).then(runtime=>{
+    if(!runtime.mode)return;
+    const label=document.querySelector(".sidebar-foot small");
+    if(label&&runtime.mode==="maintenance")label.textContent="Manutenção · automações pausadas";
+    if(label&&runtime.mode==="manual")label.textContent="Modo manual · agendas pausadas";
+    if(["maintenance","manual"].includes(runtime.mode)){
+      const banner=document.createElement("div");
+      banner.className="safety-banner";banner.setAttribute("role","status");
+      banner.textContent=runtime.mode==="manual"?"Modo manual: comandos liberados no mobile. Agendas e WhatsApp pausados; envio exige sua aprovação e validação do portal.":"Manutenção: buscas, filas e envios pausados. Você pode consultar os dados e renovar sessões em Cofres.";
+      document.body.prepend(banner);
+    }
+  }).catch(()=>{});
   initBackgroundJobs();
   initResumeQueuePanel();
   initRouter();

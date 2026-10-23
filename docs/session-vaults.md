@@ -14,8 +14,13 @@
 - Vagas.com.br
 - ProgramaThor
 - GeekHunter
+- EMPREGARE.com
 
 Workday permanece contextual por empresa e é solicitado durante a preparação da candidatura. LinkedIn continua sem sessão gerenciada pelo TSF.
+
+Perguntas, limites e auditoria dos onze Cofres: [AutoApply de 18/10/2026](vault-autoapply-audit-2026-10-18.md).
+Sessao conectada nao concede AutoSubmit ao adapter: EMPREGARE e os demais
+assistidos mantem envio manual ate existir ultima milha propria homologada.
 
 ## Fluxo
 
@@ -27,6 +32,8 @@ Workday permanece contextual por empresa e é solicitado durante a preparação 
 6. O backend revalida a sessão em um segundo contexto antes de armazená-la.
 7. O estado mínimo é cifrado com AES-256-GCM pelo `CredentialVault`; SQLite guarda apenas referência, status e datas.
 8. O perfil temporário é destruído. Sessões expiram, podem ser verificadas e podem ser desconectadas individualmente.
+
+A validade local padrão é de sete dias, limitada pela expiração real mais curta dos cookies persistentes do portal. Cookies de sessão não ampliam esse limite. O TSF faz revalidação silenciosa e sempre verifica a sessão novamente antes do AutoApply; uma revogação do portal prevalece sobre a validade local.
 
 O sistema não lê perfis normais do navegador, não acessa cofres de senha e não tenta contornar desafios humanos.
 
@@ -43,3 +50,5 @@ O protocolo `career-unified-auth://` continua local e precisa ser instalado expl
 ## Limites operacionais
 
 Os portais podem mudar URL, cookies, textos e desafios. Uma policy no registry habilita o fluxo, mas uma sessão somente vira `SESSION_ACTIVE` depois da evidência positiva e da revalidação. Falha, CAPTCHA pendente, MFA pendente, e-mail pendente ou evidência ambígua mantêm a operação em estado humano, sem fabricar sucesso.
+
+Um cofre ausente, expirado ou revogado nunca interrompe o Mass Hunt inteiro. Descobertas públicas e providers que não exigem autenticação continuam operando; somente a coleta autenticada ou a candidatura daquele destino entra em `WAITING_USER`.

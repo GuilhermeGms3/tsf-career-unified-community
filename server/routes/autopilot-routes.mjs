@@ -1,9 +1,34 @@
 import {requireLocalJsonMutation} from "../local-mutation-guard.mjs";
+import {discoveryRecovery} from "../../src/discovery/discovery-recovery.mjs";
+import {submissionRuntimeEnabled} from "../../src/application/submission-runtime-policy.mjs";
+
+export function summarizeJobHuntRun(run={}){
+  const {report,discoveryRunIds,...summary}=run;
+  if (run.sourceRecovery?.length) summary.sourceRecovery = run.sourceRecovery.slice(0, 20).map(source => ({
+    provider: source.provider, status: source.status, called: source.called,
+    skippedRequests: source.skippedRequests || 0,
+    alternativesExhausted: Boolean(source.alternativesExhausted),
+    strategyAttempts: (source.strategyAttempts || []).slice(-4),
+    recovery: source.recovery || discoveryRecovery(source.errors?.[0]?.errorCode, source.status),
+    sites: [...new Map((source.sites || []).map(site => [site.site || site.source, {
+      site: site.site || site.source, status: site.status, errorCode: site.errorCode,
+      recovery: site.recovery || discoveryRecovery(site.errorCode, site.status),
+    }])).values()],
+  }));
+  return summary;
+}
 
 export function createAutopilotRoutes({store,jobHuntService,readJson,json,sendError,publicIntegrationSettings}){
   return async function autopilotRoutes(req,res,url){
+    if(url.pathname==="/api/auto-apply/question-fallback"&&req.method==="GET"){
+      json(res,{ok:true,policy:store.questionFallbackPolicy.get()});return true;
+    }
+    if(url.pathname==="/api/auto-apply/question-fallback"&&req.method==="PUT"){
+      try{requireLocalJsonMutation(req,url);json(res,{ok:true,policy:store.questionFallbackPolicy.save(await readJson(req))});}
+      catch(error){sendError(res,error,{status:400,code:error.code||"QUESTION_FALLBACK_POLICY_INVALID",message:error.message});}return true;
+    }
     if(url.pathname==="/api/auto-apply/policy"&&req.method==="GET"){
-      json(res,{ok:true,policy:store.autoApplyPolicy.get()});
+      json(res,{ok:true,policy:store.autoApplyPolicy.get(),questionFallbackPolicy:store.questionFallbackPolicy.get()});
       return true;
     }
     if(url.pathname==="/api/auto-apply/policy"&&req.method==="PUT"){
@@ -12,8 +37,8 @@ export function createAutopilotRoutes({store,jobHuntService,readJson,json,sendEr
       return true;
     }
     if(url.pathname==="/api/job-hunt/capabilities"&&req.method==="GET"){
-      const policy=store.autoApplyPolicy.get(),controlledSubmit=/^(1|true|yes)$/i.test(String(process.env.CAREER_SUBMISSION_ENABLED||""));
-      json(res,{ok:true,sources:["indeed","linkedin","glassdoor","google","greenhouse","lever","ashby","smartrecruiters","workable","iel","programathor","solides","recrutei","nerdin","remotar","monitored_companies"],workModels:["REMOTE","HYBRID","ONSITE"],seniorities:["INTERNSHIP","JUNIOR","MID","SENIOR"],massHunt:true,canPrepareResume:true,autoSubmit:policy.enabled,controlledSubmit,autoApplyPolicy:policy});
+      const policy=store.autoApplyPolicy.get(),controlledSubmit=submissionRuntimeEnabled();
+      json(res,{ok:true,sources:["indeed","linkedin","glassdoor","google","greenhouse","lever","ashby","smartrecruiters","workable","gupy","iel","programathor","solides","recrutei","nerdin","remotar","monitored_companies"],workModels:["REMOTE","HYBRID","ONSITE"],seniorities:["INTERNSHIP","JUNIOR","MID","SENIOR"],massHunt:true,canPrepareResume:true,autoSubmit:policy.enabled&&controlledSubmit,controlledSubmit,autoApplyPolicy:policy});
       return true;
     }
     if(url.pathname==="/api/job-hunt/profiles"&&req.method==="GET"){
@@ -43,11 +68,18 @@ export function createAutopilotRoutes({store,jobHuntService,readJson,json,sendEr
       const profileId=String(url.searchParams.get("profileId")||"");
       const status=String(url.searchParams.get("status")||"").toUpperCase();
       const limit=Math.min(100,Math.max(1,Number(url.searchParams.get("limit")||100)));
-      const runs=(status==="RUNNING"?store.jobHuntRuns.active(profileId):store.jobHuntRuns.list(profileId).filter(run=>!status||run.status===status)).slice(0,limit);
-      json(res,{ok:true,runs,availabilityRuns:store.dailyRefreshRuns?.list?.(limit)||[],alerts:store.jobAlerts.list({profileId})});
+      const detail=String(url.searchParams.get("detail")||"full").toLowerCase();
+      const selected=store.jobHuntRuns.list(profileId,{limit,status,summary:detail==="summary"});
+      const runs=detail==="summary"?selected.map(summarizeJobHuntRun):selected;
+      json(res,{ok:true,runs,availabilityRuns:store.dailyRefreshRuns?.list?.(limit)||[],alerts:detail==="summary"?[]:store.jobAlerts.list({profileId})});
       return true;
     }
-    const runMatch=url.pathname.match(/^\/api\/job-hunt\/runs\/([^/]+)(?:\/(pause))?$/);
+    const runMatch=url.pathname.match(/^\/api\/job-hunt\/runs\/([^/]+)(?:\/(pause|source))?$/);
+    if(runMatch&&req.method==="POST"&&runMatch[2]==="source"){
+      try{requireLocalJsonMutation(req,url);const input=await readJson(req),run=jobHuntService.queueSource(decodeURIComponent(runMatch[1]),input.source);json(res,{ok:true,run,runId:run.id,status:run.status,reused:Boolean(run.reused)},202);}
+      catch(error){sendError(res,error,{status:error.status||400,code:error.code||"JOB_HUNT_SOURCE_FAILED",message:error.message});}
+      return true;
+    }
     if(runMatch&&req.method==="POST"&&runMatch[2]==="pause"){
       try{const run=jobHuntService.pause(decodeURIComponent(runMatch[1]));json(res,{ok:true,run});}
       catch(error){sendError(res,error,{status:error.status||400,code:error.code||"JOB_HUNT_PAUSE_FAILED",message:error.message});}

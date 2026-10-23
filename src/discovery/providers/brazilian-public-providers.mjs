@@ -4,7 +4,8 @@ import {
   normalizeDiscoveryJob,
   providerDiagnostic,
 } from "../types.mjs";
-import { extractApplicationLinks, resolveApplicationDestination } from "../application-destination-resolver.mjs";
+import { extractApplicationLinks, resolveApplicationDestination, safeApplicationUrl } from "../application-destination-resolver.mjs";
+import { publicAlternative, solidesPublicHtmlJobs } from "./public-portal-recovery.mjs";
 
 const ENTITY = Object.freeze({
   amp: "&",
@@ -334,10 +335,22 @@ class SitemapJobProvider {
   acceptJob() {
     return true;
   }
+  async loadCatalog() {
+    try { return await this.client.getText(this.sitemapUrl, { maxBytes: this.maxSitemapBytes, retries: 1 }); }
+    catch (error) {
+      return publicAlternative(error, { primary: "PUBLIC_SITEMAP", alternate: "PUBLIC_HTML_LINKS", work: async () => {
+        const home = new URL("/", this.sitemapUrl);
+        const { data } = await this.client.getText(home, { maxBytes: 1_000_000, retries: 0 });
+        const urls = [...new Set([...String(data).matchAll(/href=["']([^"']+)["']/g)].flatMap(match => {
+          try { const url = new URL(decodeEntities(match[1]), home); return url.origin === home.origin && this.jobUrlPattern.test(url.href) && !url.search ? [url.href] : []; } catch { return []; }
+        }))].slice(0, 60);
+        if (!urls.length) throw Object.assign(new Error("Página pública sem links de vagas reconhecidos."), { code: "PUBLIC_HTML_CATALOG_INVALID" });
+        return { data: `<urlset>${urls.map(url => `<url><loc>${url.replaceAll("&", "&amp;").replaceAll("<", "&lt;")}</loc></url>`).join("")}</urlset>` };
+      } });
+    }
+  }
   async search({ query = "", location = "Brasil", limit = 10 } = {}) {
-    const { data } = await this.client.getText(this.sitemapUrl, {
-        maxBytes: this.maxSitemapBytes,
-      }),
+    const catalog = await this.loadCatalog(), { data } = catalog,
       allCandidates = extractSitemapEntries(data)
         .filter((entry) => this.jobUrlPattern.test(entry.url))
         .map((entry) => ({ ...entry, score: urlScore(entry.url, query, location), id: Number(extractId(entry.url)) || 0 })),
@@ -365,7 +378,10 @@ class SitemapJobProvider {
         candidates.push(item);
       }
     } else {
-      candidates.push(...allCandidates.filter((item) => item.score > 0).slice(0, runBudget));
+      candidates.push(...allCandidates
+        .filter((item) => item.score > 0)
+        .sort((left, right) => right.score - left.score || right.id - left.id)
+        .slice(0, runBudget));
     }
     const
       jobs = [];
@@ -402,6 +418,8 @@ class SitemapJobProvider {
       jobs: jobs.slice(0, target),
       diagnostic: providerDiagnostic(jobs.length ? "HEALTHY" : failures ? "DEGRADED" : "EMPTY", {
         scope: "PUBLIC_FEED",
+        strategy: catalog.strategy || "PUBLIC_SITEMAP",
+        strategyAttempts: catalog.strategyAttempts || [],
         candidates: allCandidates.length,
         candidateUrls: allCandidates.length,
         processedUrls: processedItems.length,
@@ -684,41 +702,86 @@ export class SolidesProvider {
     });
   }
   async health() {
-    await this.client.getText("https://vagas.solides.com.br/robots.txt", {
-      maxBytes: 200_000,
-    });
+    await this.fetchPage({ take: 1 });
     return providerDiagnostic("HEALTHY", {
       scope: "PUBLIC_API",
-      message: "Portal público respondeu; nenhuma credencial foi usada.",
+      message: "Busca pública respondeu; nenhuma credencial foi usada.",
     });
   }
-  async search({ query = "", location = "Brasil", limit = 10 } = {}) {
-    const url = new URL("https://apigw.solides.com.br/jobs/v3/portal-vacancies-new");
+  async fetchPage({ query = "", location = "Brasil", page = 1, take = 14 } = {}) {
+    const url = new URL("https://vagas.solides.com.br/api/vacancies");
+    url.searchParams.set("page", String(page));
+    url.searchParams.set("take", String(take));
     if (clean(query)) url.searchParams.set("title", clean(query).slice(0, 120));
-    const { data: payload } = await this.client.getJson(url, {
-        headers: { origin: "https://vagas.solides.com.br" },
-      }),
-      raw = Array.isArray(payload?.data?.data) ? payload.data.data : [],
-      locationTerms = fold(location) === "brasil" ? [] : queryTerms(location),
-      normalized = raw
-        .filter((job) => {
-          const terms = queryTerms(query);
-          if (!terms.length) return true;
-          const searchable = fold(
-            `${job.title} ${asArray(job.occupationAreas).map(valueOf).join(" ")}`,
-          );
-          return terms.some((term) => searchable.includes(term));
-        })
-        .map((job) => this.normalize(job))
-        .filter((job) => !locationTerms.length || locationTerms.some((term) => fold(job.location).includes(term)))
-        .slice(0, Math.max(1, Math.min(50, Number(limit) || 10)));
+    if (clean(location) && !["br", "brasil", "brazil"].includes(fold(location)))
+      url.searchParams.set("locations", clean(location).slice(0, 120));
+    const { data } = await this.client.getJson(url, {
+      headers: { origin: "https://vagas.solides.com.br" },
+      retries: 1,
+    });
+    if (!Array.isArray(data?.data))
+      throw Object.assign(new Error("A busca pública Sólides retornou formato inesperado."), {
+        code: "SOLIDES_INVALID_RESPONSE",
+      });
+    return data;
+  }
+  async search({ query = "", location = "Brasil", limit = 10 } = {}) {
+    const resultsLimit = Math.max(1, Math.min(50, Math.trunc(Number(limit)) || 10)),
+      locationTerms = ["br", "brasil", "brazil"].includes(fold(location)) ? [] : queryTerms(location),
+      terms = queryTerms(query), normalized = [], seen = new Set();
+    let pagesScanned = 0, candidates = 0, totalAvailable = 0;
+    // Match the public portal's page size, with a bounded budget for local filtering.
+    for (let page = 1; page <= 4 && normalized.length < resultsLimit; page++) {
+      let payload;
+      try { payload = await this.fetchPage({ query, location, page }); }
+      catch (error) {
+        let alternative;
+        try { alternative = await publicAlternative(error, { primary: "PUBLIC_API", alternate: "PUBLIC_HTML_CATALOG", work: async () => {
+          const { data } = await this.client.getText("https://vagas.solides.com.br/vagas/todas", { maxBytes: 2_000_000, retries: 0 });
+          return { data: solidesPublicHtmlJobs(data) };
+        } }); } catch (failure) {
+          if (!normalized.length) throw failure;
+          return { jobs: normalized, diagnostic: providerDiagnostic("DEGRADED", {
+            scope: "PUBLIC_API", errorCode: failure.code || "PUBLIC_ALTERNATIVE_FAILED", errorCount: 1,
+            alternativesExhausted: Boolean(failure.alternativesExhausted), strategyAttempts: failure.strategyAttempts || [],
+            candidates, pagesScanned, resultsLimit, message: "Vagas já recebidas preservadas; paginação interrompida após falha.",
+          }) };
+        }
+        const jobs = alternative.data.map(item => this.normalize(item)).filter(item =>
+          item.lifecycleStatus === "OPEN" && (!terms.length || terms.some(term => fold(`${item.title} ${item.description}`).includes(term))) &&
+          (!locationTerms.length || locationTerms.some(term => fold(item.location).includes(term))));
+        const combined = [...new Map([...normalized, ...jobs].map(item => [item.providerJobId, item])).values()].slice(0, resultsLimit);
+        return { jobs: combined, diagnostic: providerDiagnostic(combined.length ? "HEALTHY" : "EMPTY", {
+          scope: "PUBLIC_HTML", strategy: alternative.strategy, strategyAttempts: alternative.strategyAttempts,
+          candidates: candidates + alternative.data.length, pagesScanned: pagesScanned + 1, resultsLimit,
+          message: "Catálogo HTML público usado após falha transitória da API; cobertura limitada à página recebida.",
+        }) };
+      }
+      pagesScanned++;
+      candidates += payload.data.length;
+      totalAvailable = Number(payload.count) || 0;
+      let unseen = 0;
+      for (const job of payload.data) {
+        if (!clean(job?.id) || seen.has(String(job.id))) continue;
+        seen.add(String(job.id));
+        unseen++;
+        const searchable = fold(`${job.title} ${asArray(job.occupationAreas).map(valueOf).join(" ")}`);
+        if (terms.length && !terms.some(term => searchable.includes(term))) continue;
+        const item = this.normalize(job);
+        if (locationTerms.length && !locationTerms.some(term => fold(item.location).includes(term))) continue;
+        normalized.push(item);
+        if (normalized.length >= resultsLimit) break;
+      }
+      if (!unseen || payload.data.length < 14 || page >= Number(payload.totalPages)) break;
+    }
     return {
       jobs: normalized,
       diagnostic: providerDiagnostic(normalized.length ? "HEALTHY" : "EMPTY", {
         scope: "PUBLIC_API",
-        candidates: raw.length,
-        pagesScanned: 1,
-        resultsLimit: Math.max(1, Math.min(50, Number(limit) || 10)),
+        candidates,
+        pagesScanned,
+        totalAvailable,
+        resultsLimit,
         message: normalized.length
           ? `${normalized.length} vaga(s) pública(s) encontrada(s).`
           : "Fonte respondeu, sem vagas compatíveis neste budget.",
@@ -726,11 +789,16 @@ export class SolidesProvider {
     };
   }
   normalize(job = {}) {
-    const url = `https://vagas.solides.com.br/vaga/${encodeURIComponent(job.id)}/${encodeURIComponent(clean(job.slug || job.title).replace(/\s+/g, "-"))}`,
-      remote = job.homeOffice === true || /\bremot[oa]\b/i.test(`${job.title} ${job.description}`),
+    const url = `https://vagas.solides.com.br/vaga/${encodeURIComponent(job.id)}`,
+      model = fold(job.jobType),
+      workModel = ["remoto", "remote"].includes(model) ? "REMOTE" : model === "presencial" ? "ONSITE" : model === "hibrido" ? "HYBRID" : "",
+      remote = workModel ? workModel === "REMOTE" : job.homeOffice === true || /\bremot[oa]\b/i.test(clean(job.title)),
       description = htmlToText(job.description),
-      employmentType = clean(valueOf(job.recruitmentContractType) || valueOf(job.jobType)),
-      applicationUrl = safeExternalUrl(job.redirectLink, url);
+      employmentType = asArray(job.recruitmentContractType).map(valueOf).filter(Boolean).join(", "),
+      state = clean(job.state?.code || valueOf(job.state));
+    const applicationUrl = [job.publishers?.rhgestor?.redirectUrl, job.redirectLink]
+      .map(value => safeApplicationUrl(value))
+      .find(value => value && /^[^.]+(?:\.[^.]+)+$/.test(new URL(value).hostname)) || url;
     return normalizeDiscoveryJob({
       provider: this.id,
       providerCategory: this.category,
@@ -739,12 +807,12 @@ export class SolidesProvider {
       title: clean(job.title),
       company: clean(job.companyName),
       description,
-      location: [valueOf(job.city), valueOf(job.state)].filter(Boolean).join(", ") || (remote ? "Remoto" : ""),
+      location: [valueOf(job.city), state].filter(Boolean).join(", ") || (remote ? "Remoto" : ""),
       city: clean(valueOf(job.city)),
-      state: clean(valueOf(job.state)),
+      state,
       country: "BR",
       remote,
-      workModel: remote ? "REMOTE" : "",
+      workModel: workModel || (remote ? "REMOTE" : ""),
       employmentType,
       seniority: asArray(job.seniority).map(valueOf).filter(Boolean).join(", "),
       salary: job.salary || null,

@@ -27,6 +27,7 @@ export const navigationGroups = Object.freeze([
       item("Hoje", "/", "home"),
       item("Vagas", "/opportunities", "briefcase"),
       item("Candidaturas", "/applications", "send"),
+      item("Processos", "/processes", "clock"),
       item("Currículos", "/resumes", "document"),
     ],
   },

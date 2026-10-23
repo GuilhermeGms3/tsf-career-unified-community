@@ -1,6 +1,11 @@
-export function createOpportunityRoutes({store,opportunityService,availabilityService,dailyRefreshService=null,decisionInbox=null,readJson,json,sendError}){
+export function createOpportunityRoutes({store,opportunityService,availabilityService,dailyRefreshService=null,availabilityScheduler=null,decisionInbox=null,readJson,json,sendError}){
   return async function opportunityRoutes(req,res,url){
     try{
+      if(url.pathname==="/api/opportunities/verification-policy" && ["GET","PUT"].includes(req.method)){
+        if(!availabilityScheduler)throw Object.assign(new Error("Agenda de verificação indisponível."),{status:503,code:"VERIFICATION_SCHEDULE_UNAVAILABLE"});
+        json(res,{ok:true,...(req.method==="PUT"?availabilityScheduler.save(await readJson(req)):availabilityScheduler.status())});
+        return true;
+      }
       if(url.pathname==="/api/opportunities"&&req.method==="GET"){
         if(url.searchParams.get("view")==="cards"){
           const page=await opportunityService.page({
@@ -15,7 +20,7 @@ export function createOpportunityRoutes({store,opportunityService,availabilitySe
       }
       if(url.pathname==="/api/opportunities/verify"&&req.method==="POST"){
         if(!dailyRefreshService)throw Object.assign(new Error("Verificação de vagas indisponível."),{status:503,code:"OPPORTUNITY_VERIFICATION_UNAVAILABLE"});
-        const run=dailyRefreshService.start({skipSearch:true});
+        const run=dailyRefreshService.start({skipSearch:true,catalog:true,batchSize:availabilityScheduler?.policy().batchSize||100});
         json(res,{ok:true,run,statusUrl:`/api/opportunities/verify/${encodeURIComponent(run.id)}`},202);
         return true;
       }

@@ -1,5 +1,7 @@
 const safeMessage=(status)=>status===401||status===403?"Evolution recusou a credencial.":status===404?"Instância não encontrada.":status===429?"Evolution limitou temporariamente as requisições.":`Evolution respondeu HTTP ${status}.`;
 
+import {rememberOutboundText} from "./outbound-message-guard.mjs";
+
 export class EvolutionClient{
   constructor({baseUrl=process.env.EVOLUTION_INTERNAL_URL||"http://evolution-api:8080",apiKey=process.env.EVOLUTION_API_KEY||"",fetchImpl=fetch,timeoutMs=8000}={}){this.baseUrl=String(baseUrl).replace(/\/$/,"");this.apiKey=String(apiKey);this.fetchImpl=fetchImpl;this.timeoutMs=Math.max(1000,Math.min(30000,Number(timeoutMs)||8000));}
   configured(){return Boolean(this.apiKey&&this.baseUrl);}
@@ -12,7 +14,7 @@ export class EvolutionClient{
   fetchAllGroups(instanceName){return this.request(`/group/fetchAllGroups/${encodeURIComponent(instanceName)}?getParticipants=false`,{timeoutMs:60000});}
   findWebhook(instanceName){return this.request(`/webhook/find/${encodeURIComponent(instanceName)}`);}
   setWebhook(instanceName,webhook){return this.request(`/webhook/set/${encodeURIComponent(instanceName)}`,{method:"POST",body:{webhook}});}
-  sendText(instanceName,number,text){return this.request(`/message/sendText/${encodeURIComponent(instanceName)}`,{method:"POST",body:{number,text}});}
+  sendText(instanceName,number,text){rememberOutboundText(instanceName,text);return this.request(`/message/sendText/${encodeURIComponent(instanceName)}`,{method:"POST",body:{number,text}});}
   sendMedia(instanceName,number,media){return this.request(`/message/sendMedia/${encodeURIComponent(instanceName)}`,{method:"POST",body:{number,...media},timeoutMs:30000});}
   logout(instanceName){return this.request(`/instance/logout/${encodeURIComponent(instanceName)}`,{method:"DELETE"});}
   deleteInstance(instanceName){return this.request(`/instance/delete/${encodeURIComponent(instanceName)}`,{method:"DELETE"});}

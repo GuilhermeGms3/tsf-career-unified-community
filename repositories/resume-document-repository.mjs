@@ -416,13 +416,13 @@ export class ResumeDocumentJobRepository {
       .run(id, jobType, JSON.stringify({...payload,_identityKey:identityKey}), t, t, t);
     return this.findById(id);
   }
-  claim(workerId) {
+  claim(workerId, {since=""} = {}) {
     return this.database.transaction(() => {
       const r = this.connection
         .prepare(
-          "SELECT id FROM resume_document_jobs WHERE status='QUEUED' AND available_at<=? ORDER BY created_at LIMIT 1",
+          "SELECT id FROM resume_document_jobs WHERE status='QUEUED' AND available_at<=? AND created_at>=? ORDER BY created_at LIMIT 1",
         )
-        .get(now());
+        .get(now(),since);
       if (!r) return null;
       const t = now(),
         changed = this.connection

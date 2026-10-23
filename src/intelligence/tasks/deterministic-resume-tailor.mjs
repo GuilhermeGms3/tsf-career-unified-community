@@ -1,3 +1,5 @@
+import { RESUME_PERSPECTIVES, SAVED_SUMMARY_TEXTS, RESUME_PERSPECTIVE_LIBRARY_VERSION, rewriteSavedExperience } from "./resume-perspective-library.mjs";
+
 const normalize = (value) =>
   String(value || "")
     .normalize("NFD")
@@ -6,6 +8,7 @@ const normalize = (value) =>
 const clean = (value) => String(value || "").replace(/\s+/g, " ").trim();
 const unique = (items) => [...new Set(items.filter(Boolean))];
 const STOP_WORDS = new Set(["com", "das", "dos", "para", "por", "uma", "que", "the", "and", "de", "da", "do", "em", "na", "no", "e", "a", "o"]);
+const SUMMARY_ACTIVITY = /^(?:Administração|Provisionamento|Diagnóstico|Registro|Atendimento|Automação|Desenvolvimento|Implementação|Implantação|Configuração|Organização|Estruturação|Monitoramento|Suporte|Manutenção|Sustentação|Construção|Acompanhamento|Coleta|Criação)\b/u;
 const readableList = (items) =>
   items.length < 2
     ? items[0] || ""
@@ -18,6 +21,9 @@ const requirementText = (item) =>
   );
 
 const DOMAINS = [
+  { id: "NETWORK", label: "redes e conectividade", signals: /\b(redes?|network|networking|conectividade|roteadores?|switches|cisco|dns|dhcp)\b/g },
+  { id: "NOC", label: "monitoramento e operações de TI", signals: /\b(noc|observabilidade|monitoramento)\b/g },
+  { id: "CLOUD", label: "cloud e automação", signals: /\b(cloud|nuvem|azure|aws|gcp)\b/g },
   {
     id: "DEVELOPMENT",
     label: "desenvolvimento de software",
@@ -51,6 +57,13 @@ const DOMAINS = [
 ];
 
 const FACTS = [
+  ["TCP/IP", /\btcp\s*\/\s*ip\b/i, ["NETWORK", "NOC"]],
+  ["DNS", /\bdns\b/i, ["NETWORK", "CLOUD_INFRA"]],
+  ["DHCP", /\bdhcp\b/i, ["NETWORK", "CLOUD_INFRA"]],
+  ["VPN", /\bvpn\b/i, ["NETWORK", "SECURITY"]],
+  ["Zabbix", /\bzabbix\b/i, ["NOC", "CLOUD_INFRA"]],
+  ["Grafana", /\bgrafana\b/i, ["NOC", "CLOUD_INFRA"]],
+  ["Terraform", /\bterraform\b/i, ["CLOUD", "CLOUD_INFRA"]],
   ["Active Directory", /\bactive directory\b/i, ["CLOUD_INFRA", "SUPPORT", "SECURITY"]],
   ["Microsoft Azure", /\b(?:microsoft\s+)?azure\b/i, ["CLOUD_INFRA", "DEVELOPMENT"]],
   ["AWS", /\baws\b/i, ["CLOUD_INFRA", "DEVELOPMENT"]],
@@ -96,6 +109,9 @@ function evidenceFor(pattern, evidence) {
 
 function domainFactBoost(label, domainId) {
   const priorities = {
+    NETWORK: ["tcp/ip", "dns", "dhcp", "vpn", "linux"],
+    NOC: ["zabbix", "grafana", "monitoramento", "linux"],
+    CLOUD: ["microsoft azure", "aws", "terraform", "docker", "linux"],
     SUPPORT: ["service desk n2", "troubleshooting", "ingles b2", "active directory"],
     CLOUD_INFRA: ["linux", "monitoramento", "microsoft azure", "docker", "terraform", "powershell"],
     DEVELOPMENT: ["apis rest", "java", "python", "javascript", "typescript", "node.js", "spring", "ci/cd"],
@@ -189,7 +205,7 @@ function targetedBulletChanges({ resume, evidence, domain, jobText }) {
       .sort((a, b) => b.score - a.score || a.index - b.index)
       .slice(0, 3);
   return candidates.flatMap((target) => {
-    const proposed = activeVoice(target.original);
+    const proposed = rewriteSavedExperience(activeVoice(target.original), domain.id);
     if (!proposed || normalize(proposed) === normalize(target.original)) return [];
     return [{
       type: "REWRITE_BULLET",
@@ -200,6 +216,31 @@ function targetedBulletChanges({ resume, evidence, domain, jobText }) {
       reason: `Reescrita em voz ativa para priorizar a experiência comprovada mais aderente a ${domain.label}.`,
     }];
   });
+}
+
+function summaryActivities(resume, evidence, domain, jobText) {
+  const jobTerms = normalize(jobText).split(/[^a-z0-9+#.]+/)
+    .filter(term => term.length >= 4 && !STOP_WORDS.has(term));
+  const seen = new Set();
+  return [
+    ...bulletTargets(resume.sections?.experience, "experience"),
+    ...bulletTargets(resume.sections?.projects, "projects"),
+  ].map((item, index) => {
+    const original = clean(item.original).replace(/[.!?]+$/, "");
+    const sources = evidence.filter(source => source.sourceSection === item.section &&
+      normalize(source.text).includes(normalize(original)));
+    const score = signalCount(original, domain.signals) * 8 +
+      jobTerms.reduce((sum, term) => sum + Number(normalize(original).includes(term)), 0) * 3;
+    const activity = activeVoice(original);
+    return { ...item, text: activity.charAt(0).toLowerCase() + activity.slice(1), sources, score, index };
+  }).filter(item => item.sources.length && item.score > 0 && SUMMARY_ACTIVITY.test(item.original) && item.text.length >= 25 && item.text.length <= 220)
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .filter(item => {
+      const key = normalize(item.text);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    }).slice(0, 2);
 }
 
 export function buildDeterministicTailoringVariants({
@@ -218,76 +259,32 @@ export function buildDeterministicTailoringVariants({
       body: [job.description, ...requirements.map(requirementText)].join(" "),
     }),
     facts = availableFacts(jobText, domain, evidence).slice(0, 5),
-    formationSources = contextualFact(
-      /\b(?:analise e desenvolvimento de sistemas|analise e desenvolvimento de software|ciencia da computacao|engenharia de software|sistemas de informacao)\b/i,
-      evidence.map((item) => ({ ...item, text: normalize(item.text) })),
-    ),
+    formationSources = evidence.filter(item => /\b(?:analise e desenvolvimento de sistemas|analise e desenvolvimento de software|ciencia da computacao|engenharia de software|sistemas de informacao)\b/i.test(normalize(item.text))),
     corporateSources = contextualFact(
       /\b(?:ambiente corporativo|service desk|suporte tecnico|equipe de ti)\b/i,
-      evidence,
+      evidence.filter(item => item.sourceSection === "experience" || item.metadata?.contextType === "PROFESSIONAL"),
     ),
-    collaboratorSources = contextualFact(
-      /\batendimento a colaboradores\b/i,
-      evidence,
-    ),
+    activities = summaryActivities(resume, evidence, domain, jobText),
     ids = unique([
+      ...activities.flatMap(item => item.sources.map(source => source.id)),
       ...facts.flatMap((fact) => fact.sources.map((item) => item.id)),
       ...formationSources.map((item) => item.id),
       ...corporateSources.map((item) => item.id),
     ]).slice(0, 30),
     original = clean(resume.sections?.summary),
     factList = readableList(facts.map((fact) => fact.label).slice(0, 4)),
-    supportFactList = readableList(
-      facts
-        .filter((fact) => !/^(?:Service Desk N2|Inglês B2|troubleshooting)$/i.test(fact.label))
-        .map((fact) => fact.label)
-        .slice(0, 3),
-    ),
-    hasFormation = formationSources.length > 0,
-    hasCorporateExperience = corporateSources.length > 0,
     bulletChanges = targetedBulletChanges({ resume, evidence, domain, jobText });
   if (!ids.length || !factList) return [];
 
-  const lead = hasFormation
-      ? "Profissional de tecnologia com formação em Análise e Desenvolvimento de Software"
-      : "Profissional de tecnologia",
-    experience = hasCorporateExperience
-      ? "experiência em suporte técnico e operações em ambiente corporativo"
-      : "experiência prática construída em atividades e projetos de tecnologia",
-    focusSentence = {
-      SUPPORT: "Atuação voltada a suporte técnico e operações de TI, com foco em atendimento, diagnóstico e resolução de incidentes",
-      CLOUD_INFRA: "Atuação voltada a operação, automação e sustentação de ambientes",
-      DEVELOPMENT: "Atuação voltada a desenvolvimento, integração e entrega de software",
-      SECURITY: "Atuação voltada a análise e resposta a riscos técnicos",
-      DATA: "Atuação voltada a automação, tratamento e análise de dados",
-      QUALITY: "Atuação voltada a testes e melhoria contínua",
-    }[domain.id] || `Atuação voltada a ${domain.label}`,
-    supportActivity = collaboratorSources.length
-      ? "Atuação em suporte técnico e operações de TI, com atendimento a colaboradores, diagnóstico e resolução de incidentes"
-      : "Atuação em suporte técnico e operações de TI, com foco no diagnóstico e na resolução de incidentes",
-    supportSummary = hasCorporateExperience
-      ? `${lead} e experiência em Service Desk N2 em ambiente corporativo. ${supportActivity}${supportFactList ? `, além de experiência em ${supportFactList}` : ""}.`
-      : `${lead} e experiência prática em suporte técnico. ${supportActivity}${supportFactList ? `, com experiência em ${supportFactList}` : ""}.`,
-    proposals = [
-      {
-        perspective: "Técnica",
-        text: domain.id === "SUPPORT"
-          ? supportSummary
-          : `${lead}${hasCorporateExperience ? ` e ${experience}` : ""}. Experiência prática com ${factList}. ${focusSentence}.`,
-      },
-      {
-        perspective: "Experiência",
-        text: `${lead} e ${experience}. No dia a dia, trabalha com ${factList}. ${focusSentence}.`,
-      },
-      {
-        perspective: "Contribuição",
-        text: `${experience[0].toUpperCase()}${experience.slice(1)}. Vivência com ${factList}, com foco em ${domain.label}.`,
-      },
-    ];
+  const proposals = SAVED_SUMMARY_TEXTS.map(saved => ({
+      perspective: saved.perspective,
+      text: saved.render({ activities, facts: factList, contribution: RESUME_PERSPECTIVES[domain.id].contribution }),
+    }));
   return proposals.map((variant, index) => ({
     id: `${domain.id.toLowerCase()}-${index + 1}`,
     perspective: variant.perspective,
     domain: domain.id,
+    libraryVersion: RESUME_PERSPECTIVE_LIBRARY_VERSION,
     relevance: facts.reduce((sum, fact) => sum + fact.score, 0) - index,
     changes: [
       {

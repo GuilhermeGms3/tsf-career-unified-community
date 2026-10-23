@@ -4,6 +4,14 @@ import { resolveGeographySurfaces } from "../src/discovery/search-intent/geograp
 import { DiscoveryQueryPlanner } from "../src/discovery/search-intent/discovery-query-planner.mjs";
 import { classifyGeography } from "../src/discovery/relevance/pre-match-plausibility.mjs";
 import { JobSpyProvider } from "../src/discovery/providers/jobspy-provider.mjs";
+import { mobileSearchInput } from "../server/mobile/mobile-radar.mjs";
+
+test("busca mobile preserva o pais solicitado sem impor Brasil", () => {
+  for (const location of ["Portugal", "Brasil", "Lisboa, Portugal"]) {
+    const result = mobileSearchInput({ queries: ["Software Engineer"], locations: [location], workModels: ["REMOTE"], seniorities: ["JUNIOR"], sourcePreferences: ["indeed"], prepareResume: false });
+    assert.equal(result.locationPolicy.priorities[0].remoteScope, location);
+  }
+});
 
 const portugalPolicy = {
   priorities: [

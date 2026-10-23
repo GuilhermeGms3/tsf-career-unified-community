@@ -5,10 +5,11 @@ const fact=(key,value,{source="CANDIDATE_PROFILE",sourceType="CANDIDATE_PROFILE"
 const list=value=>Array.isArray(value)?value:value===undefined||value===null||value===""?[]:[value];
 
 export class CandidateKnowledgeBase {
-  constructor(facts=[]){this.facts=new Map(facts.filter(Boolean).map(item=>[item.key,item]));}
+  constructor(facts=[]){this.facts=new Map(facts.filter(Boolean).map(item=>[item.key,item]));this.confirmedAnswers=[];}
   get(key){return this.facts.get(key)||null;}
   all(){return [...this.facts.values()];}
-  withConfirmedAnswers(answers=[]){for(const answer of answers)if(answer.verified&&answer.reusable&&!answer.sensitive)this.facts.set(answer.semanticKey,{key:answer.semanticKey,value:answer.answerValue,source:"USER_CONFIRMED",sourceType:"APPLICATION_ANSWER",verificationStatus:"USER_CONFIRMED",verified:true,confidence:1,unitType:"APPLICATION_ANSWER",reusePolicy:"REUSABLE",fingerprint:answer.fingerprint});return this;}
+  // Form answers retain their fingerprint/scope; they must not become global profile facts.
+  withConfirmedAnswers(answers=[]){this.confirmedAnswers=answers.filter(answer=>answer.verified&&answer.reusable&&!answer.sensitive);return this;}
 
   static fromFacts(facts=[],answers=[]){
     const reusable=facts.filter(item=>!item.sensitive&&(canReuseKnowledge(item)||(!item.lifecycleStatus&&item.reusePolicy==="REUSABLE"&&["USER_CONFIRMED","IMPORTED_CONFIRMED"].includes(item.verificationStatus))));

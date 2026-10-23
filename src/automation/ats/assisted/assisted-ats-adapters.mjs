@@ -56,6 +56,7 @@ export class CathoAdapter extends AssistedAtsAdapter {static type="catho";static
 export class GeekHunterAdapter extends AssistedAtsAdapter {static type="geekhunter";static version="geekhunter-assisted-adapter-v1";constructor(){super(GeekHunterAdapter.type,GeekHunterAdapter.version);}}
 
 export const assistedAtsAdapterTypes = Object.freeze({
+  empregare:class EmpregareAdapter extends AssistedAtsAdapter {static type="empregare";static version="empregare-assisted-v1";constructor(){super("empregare","empregare-assisted-v1");}},
   indeed: IndeedAdapter,
   icims: IcimsAdapter,
   taleo: TaleoAdapter,

@@ -8,7 +8,7 @@ const sessionProvider = ({
   cookieDomains,
   authenticatedPaths = [],
   authenticatedText = [],
-  sessionHours = 12,
+  sessionHours = 24 * 7,
   notes = "",
 }) => Object.freeze({
   id,
@@ -26,6 +26,15 @@ const sessionProvider = ({
 
 const providers = [
   sessionProvider({
+    id:"empregare", name:"EMPREGARE.com", accountScope:"empregare.com",
+    loginUrl:"https://careers.empregare.com/pt-br/login?tipo=candidato",
+    signupUrl:"https://careers.empregare.com/pt-br/cadastrar-curriculo",
+    allowedHosts:["empregare.com","*.empregare.com"], cookieDomains:["empregare.com",".empregare.com"],
+    authenticatedPaths:[/^https:\/\/[^/]*empregare\.com\/pt-br\/candidato\/painel(?:[/?#]|$)/i],
+    authenticatedText:[/Meu currículo/i,/Minhas candidaturas/i],
+    notes:"Preenchimento assistido; cadastro, questionarios e envio nativo ainda exigem homologacao autenticada.",
+  }),
+  sessionProvider({
     id: "gupy",
     name: "Gupy",
     accountScope: "gupy.io",
@@ -35,7 +44,6 @@ const providers = [
     cookieDomains: ["gupy.io", ".gupy.io"],
     authenticatedPaths: [/^https:\/\/portal\.gupy\.io\/my\/applications/i],
     authenticatedText: [/Minhas candidaturas/i],
-    sessionHours: 24,
     notes: "Uma sessão da conta pode ser reutilizada entre empresas Gupy.",
   }),
   sessionProvider({

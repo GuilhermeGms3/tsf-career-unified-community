@@ -5,6 +5,7 @@ import { SourceResolver } from "./source-resolver.mjs";
 import { DiscoveryPolicy } from "./discovery-policy.mjs";
 import { mergeJobFields } from "./field-merge.mjs";
 import { ApplicationMethodDetector } from "./application-method/application-method-detector.mjs";
+import { discoveryRecovery } from "./discovery-recovery.mjs";
 import {
   operationalStatusFromObservation,
   sourceSurface,
@@ -21,6 +22,17 @@ const officialProviders = new Set([
   "career-page",
 ]);
 const canonicalApplicationProviders = new Set(["greenhouse", "lever", "ashby", "smartrecruiters", "workable", "gupy", "workday"]);
+const discoveryErrorCode = (error) => {
+  if (
+    error?.name === "AbortError" ||
+    error?.name === "TimeoutError" ||
+    error?.code === 20
+  )
+    return "ENGINE_TIMEOUT";
+  return typeof error?.code === "string" && error.code
+    ? error.code
+    : "PROVIDER_ERROR";
+};
 
 export class DiscoveryService {
   constructor({
@@ -106,6 +118,10 @@ export class DiscoveryService {
           totalAvailable: Number(diagnostic.totalAvailable || result.jobs?.totalAvailable || 0),
           errorCount: Number(diagnostic.errorCount || 0),
           errorCode: diagnostic.errorCode || "",
+          recovery: discoveryRecovery(diagnostic.errorCode, diagnostic.status),
+          strategy: diagnostic.strategy || "",
+          alternativesExhausted: Boolean(diagnostic.alternativesExhausted),
+          strategyAttempts: diagnostic.strategyAttempts || [],
           checkpoint: diagnostic.checkpoint || null,
           rateLimited: Boolean(diagnostic.rateLimited),
           rateLimits: diagnostic.rateLimits || [],
@@ -113,13 +129,16 @@ export class DiscoveryService {
           sites: diagnostic.details?.sourceReports || diagnostic.sourceReports || [],
         });
       } catch (error) {
-        const sites=providerId==="jobspy"?(input.sites||input.aggregators||["indeed","linkedin","glassdoor","google"]).map(site=>({source:site,site,attempted:true,status:error.code==="ENGINE_TIMEOUT"?"TIMED_OUT":error.code==="RATE_LIMITED"?"RATE_LIMITED":"FAILED",rawResults:0,acceptedResults:0,query:String(input.query||"").slice(0,180),location:String(input.location||"").slice(0,120),country:"Brazil",durationMs:Date.now()-startedAt,errorCode:error.code||"PROVIDER_ERROR",message:error.code==="ENGINE_TIMEOUT"?"O limite global encerrou a consulta antes do relatório por portal.":"A consulta do agregador falhou antes do relatório por portal."})):[];
+        const errorCode=discoveryErrorCode(error),sites=providerId==="jobspy"?(input.sites||input.aggregators||["indeed","linkedin","glassdoor","google"]).map(site=>({source:site,site,attempted:true,status:errorCode==="ENGINE_TIMEOUT"?"TIMED_OUT":errorCode==="RATE_LIMITED"?"RATE_LIMITED":"FAILED",rawResults:0,acceptedResults:0,query:String(input.query||"").slice(0,180),location:String(input.location||"").slice(0,120),country:"Brazil",durationMs:Date.now()-startedAt,errorCode,message:errorCode==="ENGINE_TIMEOUT"?"O limite global encerrou a consulta antes do relatório por portal.":"A consulta do agregador falhou antes do relatório por portal."})):[];
         reports.push({
           provider: providerId,
-          status: error.code === "RATE_LIMITED" ? "RATE_LIMITED" : "ERROR",
+          status: errorCode === "RATE_LIMITED" ? "RATE_LIMITED" : errorCode === "ENGINE_TIMEOUT" ? "TIMED_OUT" : "ERROR",
           count: 0,
           durationMs: Date.now() - startedAt,
-          errorCode: error.code || "PROVIDER_ERROR",
+          errorCode,
+          recovery: discoveryRecovery(errorCode),
+          alternativesExhausted: Boolean(error.alternativesExhausted),
+          strategyAttempts: error.strategyAttempts || [],
           message: error.message,
           sites,
           startedAt: startedAtIso,
@@ -128,7 +147,27 @@ export class DiscoveryService {
         });
       }
     }
-    return this.finishRun({ input, run, rawJobs, reports, successfulBoards, continuations });
+    return this.finishRunCooperatively({ input, run, rawJobs, reports, successfulBoards, continuations });
+  }
+
+  async enrichJob(job) {
+    const identity = this.sources.resolve(job.applicationUrl || job.url || job.canonicalUrl);
+    const provider = this.registry.get(identity.atsType);
+    if (!["gupy", "smartrecruiters"].includes(identity.atsType) || !provider?.resolveJob) return job;
+    const detail = await provider.resolveJob({ ...job, companyIdentity: identity.organizationKey, providerJobId: identity.providerJobId });
+    if (!detail.description || detail.description.length <= (job.description || "").length) return job;
+    const timestamp = new Date().toISOString();
+    const enriched = { ...job, description: detail.description, postedAt: detail.postedAt || job.postedAt, expiresAt: detail.expiresAt || job.expiresAt, updatedAt: timestamp };
+    if (enriched.expiresAt && Date.parse(enriched.expiresAt) <= Date.parse(timestamp)) {
+      enriched.lifecycleStatus = "CLOSED";
+      enriched.closedAt = timestamp;
+      enriched.availability = { status: "CLOSED", reason: "EXPIRED_DURING_DETAIL_ENRICHMENT", checkedAt: timestamp };
+    }
+    const contentHash = hash({ title: enriched.title, company: enriched.company, description: enriched.description, location: enriched.location, applicationUrl: enriched.applicationUrl, lifecycleStatus: enriched.lifecycleStatus });
+    const persisted = this.jobRepository.upsert({ ...enriched, contentHash });
+    this.repositories.snapshot(persisted.id, contentHash, enriched, "UPDATED");
+    this.eventBus?.emit("JOB_UPDATED", { jobId: persisted.id, provider: persisted.provider, title: persisted.title, company: persisted.company });
+    return persisted;
   }
 
   ingestResolvedJobs(
@@ -160,7 +199,22 @@ export class DiscoveryService {
     });
   }
 
-  finishRun({ input, run, rawJobs, reports, successfulBoards, continuations = [], recordSourceHealth = true }) {
+  finishRun(input) {
+    const steps = this.finishRunSteps(input);
+    let step = steps.next();
+    while (!step.done) step = steps.next();
+    return step.value;
+  }
+
+  async finishRunCooperatively(input) {
+    for (const steps = this.finishRunSteps(input);;) {
+      const step = steps.next();
+      if (step.done) return step.value;
+      await new Promise(resolve => setImmediate(resolve));
+    }
+  }
+
+  *finishRunSteps({ input, run, rawJobs, reports, successfulBoards, continuations = [], recordSourceHealth = true }) {
     const counts = {
       discoveredCount: rawJobs.length,
       newCount: 0,
@@ -168,13 +222,14 @@ export class DiscoveryService {
       closedCount: 0,
       duplicateCount: 0,
       errorCount: reports.filter((item) =>
-        ["ERROR", "OFFLINE"].includes(item.status),
+        ["ERROR", "OFFLINE", "TIMED_OUT", "RATE_LIMITED", "UNSUPPORTED", "FAILED"].includes(item.status),
       ).length,
     };
     const jobs = [],
       sourceOutcomes = new Map(),
       seenByBoard = new Map();
     for (const raw of rawJobs) {
+      yield;
       let job = normalizeDiscoveryJob(raw);
       const target = this.sources.resolve(
         job.applicationUrl || job.canonicalUrl || job.sourceUrl,
@@ -285,13 +340,13 @@ export class DiscoveryService {
           workModel: job.workModel || "",
           url: job.applicationUrl || job.canonicalUrl || job.sourceUrl,
           status: current?.status || "salva",
-          lifecycleStatus: job.lifecycleStatus,
+          lifecycleStatus: current?.availabilityHistory?.length && current.lifecycleStatus === "CLOSED" ? "CLOSED" : job.lifecycleStatus,
           firstSeenAt: current?.firstSeenAt || timestamp,
           lastSeenAt: timestamp,
-          lastCheckedAt: timestamp,
-          availability: {
-            status: "AVAILABLE",
-            reason: "OBSERVED_DURING_DISCOVERY",
+          lastCheckedAt: current?.availabilityHistory?.length ? current.lastCheckedAt : timestamp,
+          availability: current?.availabilityHistory?.length && job.lifecycleStatus !== "CLOSED" ? current.availability : {
+            status: job.lifecycleStatus === "CLOSED" ? "CLOSED" : "AVAILABLE",
+            reason: job.lifecycleStatus === "CLOSED" ? "CLOSED_DURING_DISCOVERY" : "OBSERVED_DURING_DISCOVERY",
             checkedAt: timestamp,
             finalUrl: job.canonicalUrl || job.applicationUrl || job.sourceUrl,
           },

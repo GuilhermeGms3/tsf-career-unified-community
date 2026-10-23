@@ -123,6 +123,9 @@ export const presentation = {
     CONSULTED:'Consultada', BUDGET_SKIPPED:'Não executada por limite', RATE_LIMITED:'Bloqueada por limite do portal',
     PROCESS_INTERRUPTED:'Interrompida pelo reinício do aplicativo',
     USER_PAUSED:'Pausada por você',
+    AUTO_APPLY_THRESHOLD_INVALID:'A nota mínima do AutoApply deve ser um inteiro entre 0 e 100.',
+    AUTO_APPLY_WHATSAPP_BAND_INVALID:'A faixa do WhatsApp deve ficar abaixo da nota do AutoApply, com início menor ou igual ao fim.',
+    JOB_HUNT_THRESHOLDS_INVALID:'Use limites crescentes: considerar, preparar currículo e notificar.',
   },
 };
 export function humanLabel(value,domain='common') {
@@ -132,7 +135,9 @@ export function humanLabel(value,domain='common') {
 }
 export function humanError(error,domain='common') {
   const code=String(error?.code||error?.errorCode||'UNKNOWN_ERROR');
+  if(code==='MAINTENANCE_MODE')return {message:'Sistema em manutenção: automações pausadas.',nextAction:'Você pode consultar os dados e renovar sessões em Cofres.',code};
   const known=presentation[domain]?.[code]||Object.values(presentation).map(labels=>labels[code]).find(Boolean);
+  if(['AUTO_APPLY_THRESHOLD_INVALID','AUTO_APPLY_WHATSAPP_BAND_INVALID','JOB_HUNT_THRESHOLDS_INVALID'].includes(code))return {message:known,nextAction:'Corrija os limites e salve novamente.',code};
   return {message:known||'Não foi possível concluir esta ação.',nextAction:code==='GUPY_TARGET_SELECTION_REQUIRED'?'Escolha uma empresa.':/AUTH|SESSION|RUNNER|BROWSER|CHROMIUM|NODE_NOT_FOUND|CLAIM|PROTOCOL/.test(code)?'Tente novamente ou consulte como resolver.':'Tente novamente. Se persistir, consulte os detalhes técnicos.',code};
 }
 // Human-authored job/candidate prose is not an enum and must not be rewritten.

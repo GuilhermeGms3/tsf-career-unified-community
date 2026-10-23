@@ -1,3 +1,5 @@
+import { applicationRoutingThresholds } from "../application/application-routing-policy.mjs";
+
 const list = (value, max = 20) =>
   [
     ...new Set(
@@ -11,7 +13,7 @@ const time = (value) =>
     ? String(value)
     : "09:00";
 const threshold = (value) => Math.max(0, Math.min(100, Number(value)));
-const sourceIds = new Set([
+export const JOB_HUNT_SOURCE_IDS = Object.freeze([
   "indeed",
   "linkedin",
   "glassdoor",
@@ -30,6 +32,7 @@ const sourceIds = new Set([
   "remotar",
   "monitored_companies",
 ]);
+const sourceIds = new Set(JOB_HUNT_SOURCE_IDS);
 const aggregatorIds = new Set(["indeed", "linkedin", "glassdoor", "google"]);
 const workModelIds = new Set(["REMOTE", "HYBRID", "ONSITE"]);
 
@@ -65,7 +68,7 @@ function providerTargets(value = []) {
 function sourcePolicy(input, current) {
   const explicit = Array.isArray(input.sourcePreferences);
   const sourcePreferences = list(
-    explicit ? input.sourcePreferences : current.sourcePreferences || [],
+    explicit ? input.sourcePreferences : Array.isArray(input.providers) ? [] : current.sourcePreferences || [],
     sourceIds.size,
   ).filter((item) => sourceIds.has(item));
   if (!sourcePreferences.length && !explicit) {
@@ -147,6 +150,18 @@ export function nextJobHuntRun(schedule = {}, from = new Date()) {
 }
 
 export function normalizeJobHuntProfile(input = {}, current = {}) {
+  input = {
+    ...input,
+    enabled: input.enabled ?? current.enabled,
+    prepareResume: input.prepareResume ?? current.prepareResume,
+    massHunt: input.massHunt ?? current.massHunt,
+    schedule: { ...current.schedule, ...input.schedule },
+    notificationPolicy: {
+      ...current.notificationPolicy,
+      ...input.notificationPolicy,
+      quietHours: { ...current.notificationPolicy?.quietHours, ...input.notificationPolicy?.quietHours },
+    },
+  };
   const schedule = {
     mode: input.schedule?.mode === "INTERVAL" ? "INTERVAL" : "WEEKLY",
     days: list(input.schedule?.days, 7)
@@ -169,10 +184,10 @@ export function normalizeJobHuntProfile(input = {}, current = {}) {
       start: time(input.notificationPolicy?.quietHours?.start || "22:00"),
       end: time(input.notificationPolicy?.quietHours?.end || "08:00"),
     },
-    decisionClasses: list(input.notificationPolicy?.decisionClasses, 3).filter(
+    decisionClasses: list(input.notificationPolicy?.decisionClasses ?? ["RECOMMENDED", "REVIEW", "STRETCH"], 3).filter(
       (value) => ["RECOMMENDED", "REVIEW", "STRETCH"].includes(value),
     ),
-    delivery: list(input.notificationPolicy?.delivery, 3).filter(
+    delivery: list(input.notificationPolicy?.delivery ?? ["WHATSAPP"], 3).filter(
       (value) => value === "WHATSAPP",
     ),
     summaryFields: list(input.notificationPolicy?.summaryFields, 8).filter(
@@ -284,6 +299,24 @@ export function normalizeJobHuntProfile(input = {}, current = {}) {
     notificationPolicy,
     schedule,
     nextRunAt: enabled ? nextJobHuntRun(schedule) : null,
+  };
+}
+
+export function effectiveJobHuntThresholds(profile = {}, policy = {}) {
+  const configured = {
+    consider: Number(profile.considerThreshold ?? 70),
+    prepareResume: Number(profile.prepareResumeThreshold ?? 82),
+    notify: Number(profile.notifyThreshold ?? 90),
+  };
+  if (policy.enabled !== true) return { ...configured, authority: "SEARCH_PROFILE" };
+  const thresholds=applicationRoutingThresholds(policy);
+  if(!thresholds.valid)return {...configured,authority:"SEARCH_PROFILE",reason:"ROUTING_POLICY_INVALID"};
+  const routingFloor = Math.min(thresholds.minimumAtsScore, thresholds.whatsappMinimumAtsScore);
+  return {
+    consider: Math.min(configured.consider, routingFloor),
+    prepareResume: Math.min(configured.prepareResume, routingFloor),
+    notify: Math.min(configured.notify, routingFloor),
+    authority: "AUTO_APPLY_POLICY",
   };
 }
 

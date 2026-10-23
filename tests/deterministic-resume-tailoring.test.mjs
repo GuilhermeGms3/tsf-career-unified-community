@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { ResumeTailor } from "../src/intelligence/tasks/resume-tailor.mjs";
 import { buildResumeSourceEvidence } from "../src/resume/resume-source-evidence.mjs";
+import { taskPrompt } from "../src/intelligence/prompts/task-definitions.mjs";
 
 const offlineService = {
   execute: async () => ({
@@ -26,6 +27,40 @@ const resume = {
       "API REST em Python com Docker, Git e integração contínua.",
   },
 };
+
+test("resumo offline narra atividades comprovadas sem compilar stacks ou escolaridade", async () => {
+  const base = { id: "natural", sections: {
+    summary: "Profissional de tecnologia com formação e experiência em TI.",
+    experience: [{ bullets: [
+      "Suporte a ambientes Microsoft Azure, incluindo provisionamento, monitoramento e manutenção de máquinas virtuais.",
+      "Atendimento N1/N2, com diagnóstico, registro e resolução de incidentes em ambiente corporativo.",
+    ] }],
+    skills: "Inglês B2, Java, Docker e Kubernetes",
+    education: "Engenharia de Software em andamento",
+  } };
+  const result = await new ResumeTailor(offlineService).tailor({
+    job: { title: "Analista de Infraestrutura", description: "Azure, máquinas virtuais e atendimento de incidentes" }, resume: base,
+  });
+  assert.equal(result.evidenceStatus, "VALID");
+  const summary = result.tailoredResume.sections.summary;
+  assert.match(summary, /provisionamento, monitoramento e manutenção de máquinas virtuais/);
+  assert.doesNotMatch(summary, /Profissional de tecnologia|Vivência com|Atuação voltada|Inglês|Kubernetes|Engenharia/);
+  assert.doesNotMatch(summary, /inclui .*incluindo/);
+  assert.doesNotMatch(summary, /\b(?:Minha|Meus|Tenho|trabalhei|desenvolvi)\b/i);
+  assert.equal(result.meta.libraryVersion, "role-texts-v2");
+  assert.match(taskPrompt("RESUME_TAILORING", {}), /No resumo, use redação impessoal/);
+});
+
+test("resumo mantém atividade de projeto identificada como projeto", async () => {
+  const base = { id: "project", sections: {
+    summary: "Conhecimentos técnicos em desenvolvimento e infraestrutura.",
+    projects: [{ bullets: ["Desenvolvimento de APIs REST com Python e Docker para uma aplicação de estudo."] }],
+  } };
+  const result = await new ResumeTailor(offlineService).tailor({ job: { title: "Desenvolvedor Python", description: "APIs REST" }, resume: base });
+  assert.equal(result.evidenceStatus, "VALID");
+  assert.match(result.tailoredResume.sections.summary, /projetos.*APIs REST/i);
+  assert.doesNotMatch(result.tailoredResume.sections.summary, /experiência profissional|ambiente corporativo/);
+});
 
 test("fallback sem Ollama compara tres perspectivas e reescreve objetivo amplo", async () => {
   const result = await new ResumeTailor(offlineService).tailor({

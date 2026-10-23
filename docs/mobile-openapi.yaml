@@ -1,0 +1,506 @@
+openapi: 3.1.0
+info:
+  title: TSF Career Mobile Gateway
+  version: 1.0.0
+  description: >-
+    Contrato compacto para o cliente Android. A identidade e injetada pelo
+    Tailscale Serve; o aplicativo nao envia credenciais do TSF ou dos portais.
+servers:
+  - url: https://{tailnetHost}/api/mobile/v1
+    variables:
+      tailnetHost:
+        default: tsf-career.example.ts.net
+security:
+  - tailscaleIdentity: []
+paths:
+  /health:
+    get:
+      operationId: mobileHealth
+      responses:
+        "200":
+          description: Gateway acessivel e identidade autorizada.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+  /today:
+    get:
+      operationId: mobileToday
+      parameters:
+        - name: fresh
+          in: query
+          schema:
+            type: boolean
+            default: false
+      responses:
+        "200":
+          description: Caixa de decisoes do dia e radar ativo.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, today]
+                properties:
+                  ok: { type: boolean }
+                  today: { $ref: "#/components/schemas/Today" }
+  /opportunities:
+    get:
+      operationId: listMobileOpportunities
+      parameters:
+        - { name: section, in: query, schema: { type: string, default: recommended } }
+        - { name: query, in: query, schema: { type: string, maxLength: 120 } }
+        - { name: offset, in: query, schema: { type: integer, minimum: 0, default: 0 } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 50, default: 20 } }
+      responses:
+        "200":
+          description: Pagina compacta de oportunidades.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, opportunities, pagination]
+                properties:
+                  ok: { type: boolean }
+                  opportunities:
+                    type: array
+                    items: { $ref: "#/components/schemas/Opportunity" }
+                  pagination: { $ref: "#/components/schemas/Pagination" }
+  /opportunities/{jobId}:
+    get:
+      operationId: getMobileOpportunity
+      parameters:
+        - $ref: "#/components/parameters/JobId"
+      responses:
+        "200":
+          description: Oportunidade com descricao e contexto operacional.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, opportunity]
+                properties:
+                  ok: { type: boolean }
+                  opportunity: { $ref: "#/components/schemas/OpportunityDetail" }
+        "404":
+          $ref: "#/components/responses/Error"
+  /opportunities/{jobId}/feedback:
+    put:
+      operationId: saveMobileOpportunityFeedback
+      parameters:
+        - $ref: "#/components/parameters/JobId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [userDecision]
+              properties:
+                userDecision:
+                  type: string
+                  enum: [APPLY, REVIEW, REJECT]
+                rejectionReason:
+                  type: string
+                  maxLength: 500
+      responses:
+        "200":
+          description: Feedback persistido ou repeticao idempotente.
+          headers:
+            Idempotent-Replayed:
+              schema: { type: boolean }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Acknowledgement" }
+        "400":
+          $ref: "#/components/responses/Error"
+  /hunts:
+    get:
+      operationId: listMobileHunts
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 30, default: 12 } }
+      responses:
+        "200":
+          description: Radar ativo, historico, criterios manuais e cobertura. Perfis legados permanecem apenas por compatibilidade.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, active, history, profiles]
+                properties:
+                  ok: { type: boolean }
+                  active: { type: array, items: { $ref: "#/components/schemas/Hunt" } }
+                  history: { type: array, items: { $ref: "#/components/schemas/Hunt" } }
+                  profiles: { type: array, items: { $ref: "#/components/schemas/HuntProfile" } }
+                  search: { $ref: "#/components/schemas/MobileSearch" }
+                  sources: { type: array, items: { $ref: "#/components/schemas/RadarSource" } }
+                  vaults: { type: array, items: { $ref: "#/components/schemas/RadarSource" } }
+                  operationMode: { type: string, enum: [normal, manual, maintenance] }
+    post:
+      operationId: startMobileHunt
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                profileId: { type: string }
+                search: { $ref: "#/components/schemas/MobileSearch" }
+      responses:
+        "202":
+          description: Mass Hunt enfileirado.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HuntResponse" }
+        "409":
+          $ref: "#/components/responses/Error"
+  /hunts/{runId}:
+    get:
+      operationId: getMobileHunt
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      responses:
+        "200":
+          description: Estado atual de uma execucao.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HuntResponse" }
+        "404":
+          $ref: "#/components/responses/Error"
+  /hunts/{runId}/pause:
+    post:
+      operationId: pauseMobileHunt
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Pausa solicitada e estado resultante.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HuntResponse" }
+  /applications:
+    get:
+      operationId: listMobileApplications
+      responses:
+        "200":
+          description: Resumo das candidaturas mais recentes.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, applications]
+                properties:
+                  ok: { type: boolean }
+                  applications:
+                    type: array
+                    items: { $ref: "#/components/schemas/Application" }
+  /events:
+    get:
+      operationId: streamMobileEvents
+      responses:
+        "200":
+          description: Invalidações em tempo real sem dados sensíveis.
+          content:
+            text/event-stream:
+              schema: { type: string }
+  /decisions:
+    get:
+      operationId: listMobileDecisions
+      responses:
+        "200":
+          description: Caixa de decisões e handoffs ativos.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  decisions: { type: array, items: { $ref: "#/components/schemas/Decision" } }
+  /applications/{applicationId}:
+    get:
+      operationId: getMobileApplication
+      parameters:
+        - $ref: "#/components/parameters/ApplicationId"
+      responses:
+        "200":
+          description: Estado atual, perguntas, PDF e ultimos 30 eventos da candidatura.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  application:
+                    type: object
+                    properties:
+                      id: { type: string }
+                      jobId: { type: string }
+                      portalUrl: { type: string, description: "URL HTTPS validada para concluir no portal, ou vazia." }
+                      status: { type: string }
+                      title: { type: string }
+                      company: { type: string }
+                      nextAction: { type: [string, "null"] }
+                      resumeVersionId: { type: string }
+                      resumePdfAvailable: { type: boolean }
+                      questions: { type: array, items: { type: object, additionalProperties: true } }
+                      events: { type: array, items: { type: object, properties: { type: { type: string }, at: { type: string } } } }
+                      recovery:
+                        type: object
+                        description: Evidencias do ultimo preenchimento; nao comprova sessao visual salva nem disponibilidade atual dos campos no portal.
+                        properties:
+                          inspectedAt: { type: string }
+                          fieldsFound: { type: integer }
+                          filledFields: { type: integer }
+                          failedFields: { type: integer }
+                          attemptCount: { type: integer }
+                          resumeUploaded: { type: boolean }
+                          lastErrorCode: { type: string }
+                          receiptConfirmed: { type: boolean }
+                          browserContinuationAvailable: { type: boolean, const: false }
+                          browserNotice: { type: string }
+  /applications/{applicationId}/actions:
+    post:
+      operationId: executeMobileApplicationAction
+      parameters:
+        - $ref: "#/components/parameters/ApplicationId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action: { type: string, enum: [APPROVE, ANALYZE, REQUEST_CHANGE, REJECT, RESUME] }
+                instruction: { type: string, maxLength: 800 }
+      responses:
+        "200": { description: Ação concluída. }
+        "202": { description: Ação assíncrona iniciada. }
+  /applications/{applicationId}/questions:
+    post:
+      operationId: answerMobileApplicationQuestion
+      parameters:
+        - $ref: "#/components/parameters/ApplicationId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [questionId, answer]
+              properties:
+                questionId: { type: string }
+                answer: { type: string, maxLength: 2000 }
+      responses:
+        "200": { description: Resposta registrada e candidatura retomada. }
+  /applications/{applicationId}/resume.pdf:
+    get:
+      operationId: viewMobileApplicationResume
+      parameters:
+        - $ref: "#/components/parameters/ApplicationId"
+      responses:
+        "200":
+          description: PDF exato vinculado à candidatura.
+          content:
+            application/pdf: {}
+components:
+  securitySchemes:
+    tailscaleIdentity:
+      type: apiKey
+      in: header
+      name: Tailscale-User-Login
+      description: Cabeçalho confiavel inserido pelo Tailscale Serve, nunca pelo app.
+  parameters:
+    JobId:
+      name: jobId
+      in: path
+      required: true
+      schema: { type: string }
+    RunId:
+      name: runId
+      in: path
+      required: true
+      schema: { type: string }
+    ApplicationId:
+      name: applicationId
+      in: path
+      required: true
+      schema: { type: string }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: { type: string, minLength: 12, maxLength: 200 }
+  responses:
+    Error:
+      description: Erro autenticado e sanitizado.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+  schemas:
+    MobileSearch:
+      type: object
+      required: [queries, locations, workModels, seniorities, sourcePreferences, prepareResume]
+      description: Busca manual isolada; nao altera agendas, limiares globais ou autorizacao de envio. profileId e legado; quando search existe, usa o perfil manual mobile dedicado.
+      properties:
+        queries: { type: array, minItems: 1, maxItems: 20, items: { type: string, maxLength: 120 } }
+        locations: { type: array, maxItems: 12, items: { type: string, maxLength: 120 } }
+        workModels: { type: array, minItems: 1, maxItems: 3, items: { type: string, enum: [REMOTE, HYBRID, ONSITE] } }
+        seniorities: { type: array, maxItems: 4, items: { type: string, enum: [INTERNSHIP, JUNIOR, MID, SENIOR] } }
+        sourcePreferences: { type: array, minItems: 1, maxItems: 17, items: { type: string } }
+        prepareResume: { type: boolean }
+    RadarSource:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        canDiscover: { type: boolean }
+        sessionManaged: { type: boolean }
+        authentication: { type: string }
+        availability: { type: string }
+        canSubmit: { type: boolean }
+    Decision:
+      type: object
+      required: [id, kind, status, title, actions]
+      properties:
+        id: { type: string }
+        kind: { type: string, enum: [APPLICATION, QUESTION, HANDOFF] }
+        status: { type: string }
+        title: { type: string }
+        company: { type: string }
+        score: { type: [number, "null"] }
+        resumePdfAvailable: { type: boolean }
+        questions: { type: array, items: { type: object, additionalProperties: true } }
+        actions: { type: array, items: { type: string } }
+    HealthResponse:
+      type: object
+      required: [ok, service, apiVersion, serverTime, identity]
+      properties:
+        ok: { type: boolean }
+        service: { type: string }
+        apiVersion: { type: integer }
+        readOnly: { type: boolean, description: "Em manutencao, apenas consultas estao disponiveis; mutacoes retornam HTTP 423." }
+        operationMode: { type: string, enum: [normal, maintenance, manual] }
+        serverTime: { type: string, format: date-time }
+        identity:
+          type: object
+          required: [login, displayName]
+          properties:
+            login: { type: string }
+            displayName: { type: string }
+    Today:
+      type: object
+      required: [generatedAt, status, headline, counts, actions]
+      properties:
+        generatedAt: { type: string }
+        status: { type: string }
+        headline: { type: string }
+        counts:
+          type: object
+          additionalProperties: { type: integer }
+        actions:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        activeHunt:
+          oneOf:
+            - $ref: "#/components/schemas/Hunt"
+            - type: "null"
+    Opportunity:
+      type: object
+      required: [id, title, company, location, workModel, seniority, source, url, disposition, reason, strengths, decision, applicationStatus, freshness]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        company: { type: string }
+        location: { type: string }
+        workModel: { type: string }
+        seniority: { type: string }
+        source: { type: string }
+        url: { type: string }
+        score: { type: [number, "null"] }
+        confidence: { type: [number, "null"] }
+        disposition: { type: string }
+        reason: { type: string }
+        strengths: { type: array, items: { type: string } }
+        decision: { type: string }
+        applicationStatus: { type: string }
+        freshness:
+          type: object
+          additionalProperties: true
+    OpportunityDetail:
+      allOf:
+        - $ref: "#/components/schemas/Opportunity"
+        - type: object
+          properties:
+            description: { type: string }
+            requirements: { type: array, items: { type: object, additionalProperties: true } }
+            nextAction: { type: [object, "null"], additionalProperties: true }
+            resume: { type: [object, "null"], additionalProperties: true }
+    Pagination:
+      type: object
+      additionalProperties: true
+    Hunt:
+      type: object
+      required: [id, profileId, profileName, triggerType, status, stage, progress, sources, recentJobs]
+      properties:
+        id: { type: string }
+        profileId: { type: string }
+        profileName: { type: string }
+        triggerType: { type: string }
+        status: { type: string }
+        stage: { type: string }
+        startedAt: { type: string }
+        completedAt: { type: string }
+        errorCode: { type: string }
+        progress: { type: object, additionalProperties: { type: integer } }
+        sources: { type: array, items: { type: object, additionalProperties: true } }
+        recentJobs: { type: array, items: { type: object, additionalProperties: true } }
+    HuntProfile:
+      type: object
+      required: [id, name, enabled]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        enabled: { type: boolean }
+        nextRunAt: { type: string }
+    HuntResponse:
+      type: object
+      required: [ok, hunt]
+      properties:
+        ok: { type: boolean }
+        hunt: { $ref: "#/components/schemas/Hunt" }
+    Application:
+      type: object
+      required: [id, status, updatedAt, title, company, pendingQuestions]
+      properties:
+        id: { type: string }
+        status: { type: string }
+        updatedAt: { type: string }
+        title: { type: string }
+        company: { type: string }
+        pendingQuestions: { type: integer }
+        nextAction: { type: [object, "null"], additionalProperties: true }
+    Acknowledgement:
+      type: object
+      required: [ok]
+      properties:
+        ok: { type: boolean }
+      additionalProperties: true
+    Error:
+      type: object
+      required: [ok, code, error]
+      properties:
+        ok: { type: boolean, const: false }
+        code: { type: string }
+        error: { type: string }

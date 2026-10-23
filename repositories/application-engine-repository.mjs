@@ -34,12 +34,25 @@ export class ApplicationPlanRepository {
 }
 export class ApplicationQuestionRepository {
   constructor(connection) { this.connection=connection; }
-  sync(applicationId, fields=[]) {
+  sync(applicationId, fields=[], {complete=false}={}) {
     const timestamp=now();
     for(const f of fields){const current=this.connection.prepare("SELECT * FROM application_questions WHERE application_id=? AND (external_key=? OR (fingerprint IS NOT NULL AND fingerprint=?)) ORDER BY CASE WHEN fingerprint=? THEN 0 ELSE 1 END LIMIT 1").get(applicationId,f.externalKey,f.fingerprint||"",f.fingerprint||"");
       const values=[f.externalKey,f.semanticKey||"CUSTOM.QUESTION",f.label||"",f.fieldType||f.type||"text",f.required?1:0,JSON.stringify(f.options||[]),f.answer===undefined||f.answer===null?null:JSON.stringify(f.answer),f.answerSource||null,f.answerStatus||(f.required?"USER_REQUIRED":"UNKNOWN"),f.sensitive?1:0,f.fingerprint||null,f.normalizedQuestion||"",f.questionClass||"CUSTOM_UNKNOWN",f.answerCategory||"APPLICATION_SPECIFIC",f.description||"",f.multiple?1:0,Number(f.confidence||0),JSON.stringify(f.signals||[]),f.consentType||null,f.reusable?1:0,f.reasonRequired||"",timestamp];
       if(current)this.connection.prepare(`UPDATE application_questions SET external_key=?,semantic_key=?,label=?,field_type=?,required=?,options_json=?,answer_value_json=COALESCE(answer_value_json,?),answer_source=COALESCE(answer_source,?),answer_status=CASE WHEN answer_value_json IS NULL THEN ? ELSE answer_status END,sensitive=?,fingerprint=?,normalized_question=?,question_class=?,answer_category=?,description=?,multiple=?,confidence=?,signals_json=?,consent_type=?,reusable=?,reason_required=?,updated_at=? WHERE id=?`).run(...values,current.id);
       else this.connection.prepare(`INSERT INTO application_questions(id,application_id,external_key,semantic_key,label,field_type,required,options_json,answer_value_json,answer_source,answer_status,sensitive,fingerprint,normalized_question,question_class,answer_category,description,multiple,confidence,signals_json,consent_type,reusable,reason_required,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(`question-${randomUUID()}`,applicationId,...values.slice(0,-1),timestamp,timestamp);
+      if(f.answerFormatInvalid)this.connection.prepare("UPDATE application_questions SET answer_status='USER_REQUIRED' WHERE application_id=? AND external_key=?").run(applicationId,f.externalKey);
+      if(complete&&current&&!current.required&&f.required&&current.answer_status!=="KNOWN")this.connection.prepare("UPDATE application_questions SET answer_status='USER_REQUIRED' WHERE id=?").run(current.id);
+      if(current?.fingerprint&&f.fingerprint&&current.fingerprint!==f.fingerprint){
+        this.connection.prepare("UPDATE application_questions SET answer_status=? WHERE id=?").run(f.required?"USER_REQUIRED":"UNKNOWN",current.id);
+        this.connection.prepare("UPDATE whatsapp_question_requests SET status='DEFERRED',updated_at=? WHERE question_id=? AND status IN ('PREPARED','AWAITING_ANSWER')").run(timestamp,current.id);
+      }
+    }
+    if(complete){
+      const present=new Set(fields.map(field=>field.externalKey));
+      for(const question of this.forApplication(applicationId).filter(question=>!present.has(question.externalKey))){
+        this.connection.prepare("UPDATE application_questions SET required=0,answer_status=CASE WHEN answer_status='KNOWN' THEN 'KNOWN' ELSE 'UNKNOWN' END,reason_required=?,updated_at=? WHERE id=?").run("Campo ausente no snapshot atual; preservado no historico.",timestamp,question.id);
+        this.connection.prepare("UPDATE whatsapp_question_requests SET status='DEFERRED',updated_at=? WHERE question_id=? AND status IN ('PREPARED','AWAITING_ANSWER')").run(timestamp,question.id);
+      }
     }
     return this.forApplication(applicationId);
   }

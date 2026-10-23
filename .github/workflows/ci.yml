@@ -27,6 +27,12 @@ jobs:
       - name: Check syntax
         run: npm run check:syntax
 
+      - name: Check public release boundaries
+        run: node scripts/check-public-release.mjs
+
+      - name: Install test browser
+        run: npx playwright install --with-deps chromium
+
       - name: Run Node test suite
         run: npm test
 

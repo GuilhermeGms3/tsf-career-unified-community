@@ -32,3 +32,8 @@ test("timeout global do JobSpy ainda produz telemetria TIMED_OUT por portal",asy
   const dataDir=await mkdtemp(path.join(os.tmpdir(),"portal-timeout-")),store=await new UnifiedStateStore({dataDir}).initialize(),provider={id:"jobspy",category:K.AGGREGATOR,capabilities:[],health:async()=>providerDiagnostic("HEALTHY"),search:async()=>{throw Object.assign(new Error("timeout"),{code:"ENGINE_TIMEOUT"});}};
   try{const result=await new DiscoveryService({registry:new ProviderRegistry([provider]),repositories:store.discovery,jobRepository:store.jobs}).discover({query:"Suporte",location:"Brasília, DF",providers:["jobspy"],sites:["indeed","linkedin"]});assert.deepEqual(result.sourceReports[0].sites.map(item=>item.status),["TIMED_OUT","TIMED_OUT"]);assert.deepEqual(result.sourceReports[0].sites.map(item=>item.site),["indeed","linkedin"]);}finally{store.close();await rm(dataDir,{recursive:true,force:true});}
 });
+
+test("timeout nativo com código numérico vira diagnóstico legível",async()=>{
+  const dataDir=await mkdtemp(path.join(os.tmpdir(),"native-timeout-")),store=await new UnifiedStateStore({dataDir}).initialize(),provider={id:"recrutei",category:K.BRAZIL,capabilities:[],health:async()=>providerDiagnostic("HEALTHY"),search:async()=>{const error=new Error("The operation was aborted due to timeout");error.name="TimeoutError";error.code=20;throw error;}};
+  try{const result=await new DiscoveryService({registry:new ProviderRegistry([provider]),repositories:store.discovery,jobRepository:store.jobs}).discover({query:"Suporte",providers:["recrutei"]});assert.equal(result.sourceReports[0].status,"TIMED_OUT");assert.equal(result.sourceReports[0].errorCode,"ENGINE_TIMEOUT");}finally{store.close();await rm(dataDir,{recursive:true,force:true});}
+});

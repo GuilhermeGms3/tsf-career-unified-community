@@ -7,6 +7,7 @@ import {
   jobMatchesWorkModels,
   nextJobHuntRun,
   normalizeJobHuntProfile,
+  effectiveJobHuntThresholds,
 } from "./job-hunt-policy.mjs";
 import { calculateOpportunityPriority } from "../opportunities/opportunity-priority.mjs";
 import { evaluateOpportunityDecision } from "../opportunities/opportunity-decision-policy-v2.mjs";
@@ -16,6 +17,9 @@ import { classifyThresholdScore } from "../discovery/v4/mass-hunt-funnel.mjs";
 import { PreMatchPlausibility } from "../discovery/relevance/pre-match-plausibility.mjs";
 import { serializePreMatchDecision } from "../discovery/relevance/pre-match-snapshot.mjs";
 import { brazilianProviderDefinitions } from "../discovery/providers/brazilian-public-providers.mjs";
+import { discoveryRecovery } from "../discovery/discovery-recovery.mjs";
+import { jobInformationQuality } from "../matching/job-information-quality.mjs";
+import { distinctOpportunityJobs, duplicateOpportunityKey } from "../opportunities/opportunity-freshness.mjs";
 
 const fingerprint = (value) =>
   createHash("sha256").update(JSON.stringify(value)).digest("hex");
@@ -30,7 +34,19 @@ const providerSourceClass = (provider) =>
   (provider === "jobspy" ? "JOB_BOARD" : "STRUCTURED_ATS");
 
 export function fairRequestSchedule(requestGroups = []) {
-  return requestGroups.flat();
+  return requestGroups.flatMap(group => {
+    const providers = new Map();
+    for (const request of group) {
+      const provider = request.providers?.[0] || request.provider;
+      if (!providers.has(provider)) providers.set(provider, []);
+      providers.get(provider).push(request);
+    }
+    const scheduled = [];
+    const queues = [...providers.values()];
+    for (let index = 0; queues.some(queue => index < queue.length); index++)
+      for (const queue of queues) if (queue[index]) scheduled.push(queue[index]);
+    return scheduled;
+  });
 }
 
 export function rotateProviderTargets(targets = [], offset = 0) {
@@ -48,6 +64,7 @@ export class JobHuntService {
     eventBus,
     prepareResume = null,
     requestApproval = null,
+    reviewOnly = false,
     preMatch = new PreMatchPlausibility(),
   } = {}) {
     Object.assign(this, {
@@ -58,6 +75,7 @@ export class JobHuntService {
       eventBus,
       prepareResume,
       requestApproval,
+      reviewOnly,
       preMatch,
     });
     this.searchIntent = new SearchIntentService({
@@ -88,7 +106,11 @@ export class JobHuntService {
   }
 
   listProfiles() {
-    return this.store.jobHuntProfiles.all();
+    const policy = this.store.autoApplyPolicy?.get() || {};
+    return this.store.jobHuntProfiles.all().map(profile => ({
+      ...profile,
+      effectiveThresholds: effectiveJobHuntThresholds(profile, policy),
+    }));
   }
 
   saveProfile(input, id = "") {
@@ -143,9 +165,10 @@ export class JobHuntService {
   }
 
   async runDue(now = new Date()) {
+    await this.flushDeferredAlerts(now);
     const results = [];
     for (const profile of this.store.jobHuntProfiles.due(now.toISOString())) {
-      const latest = this.store.jobHuntRuns.list(profile.id)[0];
+      const latest = this.store.jobHuntRuns.list(profile.id,{limit:1,summary:true})[0];
       if (
         latest?.errorCode === "PROCESS_INTERRUPTED" &&
         latest.completedAt &&
@@ -167,6 +190,32 @@ export class JobHuntService {
       );
     }
     return results;
+  }
+
+  async flushDeferredAlerts(now = new Date()) {
+    if (this.flushingAlerts || !this.requestApproval || !this.store.jobAlerts.pendingDelivery) return;
+    this.flushingAlerts = true;
+    try {
+      for (const alert of this.store.jobAlerts.pendingDelivery(now.toISOString())) {
+        const profile=this.store.jobHuntProfiles.findById(alert.profileId);
+        const job=this.store.jobs.findById(alert.jobId);
+        if (!profile || !job || job.lifecycleStatus === "CLOSED" ||
+          profile.notificationPolicy.delivery?.length === 0 ||
+          profile.notificationPolicy.decisionClasses?.length === 0) {
+          this.store.jobAlerts.mark(alert.id,"SUPPRESSED");continue;
+        }
+        if (isQuietHours(profile.notificationPolicy,now)) continue;
+        if (!alert.payload.resumeVersionId || alert.payload.resumeStatus !== "READY") continue;
+        try {
+          const result=await this.requestApproval({job,resumeVersionId:alert.payload.resumeVersionId,profileId:profile.id,jobAlertId:alert.id});
+          if (result?.handled === true || result?.sent === true) this.store.jobAlerts.mark(alert.id,"SENT");
+          else this.store.jobAlerts.retryDelivery(alert.id);
+        } catch(error) {
+          this.store.jobAlerts.retryDelivery(alert.id);
+          this.store.structuredLogs?.record({category:"AUTOMATION",level:"WARN",eventCode:"WHATSAPP_DEFERRED_DELIVERY_FAILED",jobId:job.id,errorCode:error.code||"WHATSAPP_DELIVERY_FAILED"});
+        }
+      }
+    } finally { this.flushingAlerts=false; }
   }
 
   pause(runId) {
@@ -428,6 +477,20 @@ export class JobHuntService {
     return this.queue(prepared.profile.id, prepared.runOptions);
   }
 
+  queueSource(runId, source) {
+    const previous = this.store.jobHuntRuns.findById(runId);
+    if (!previous) throw Object.assign(new Error("Rodada não encontrada."), { code: "JOB_HUNT_RUN_NOT_FOUND", status: 404 });
+    const profile = this.store.jobHuntProfiles.findById(previous.profileId);
+    if (!profile) throw Object.assign(new Error("Perfil da rodada não encontrado."), { code: "JOB_HUNT_PROFILE_NOT_FOUND", status: 404 });
+    const selected = String(source || "").trim().toLowerCase();
+    const available = (previous.report?.sourceReports || []).flatMap(report => report.provider === "jobspy" ? (report.sites || []).map(site => site.site || site.source) : [report.provider]);
+    if (!available.includes(selected)) throw Object.assign(new Error("Selecione uma fonte consultada nesta rodada."), { code: "JOB_HUNT_SOURCE_INVALID", status: 400 });
+    const targetedId = `job-hunt-source-${previous.profileId}-${selected}`;
+    const active = this.store.jobHuntRuns.active?.(targetedId)?.[0];
+    if (active) return { ...active, reused: true };
+    return this.queueManual({ ...profile, name: `Busca direcionada: ${selected}`, sourcePreferences: [selected], providerTargets: this.providerTargets(profile).filter(target => target.provider === selected), companyWatchlistIds: [], enabled: false, prepareResume: false }, { profileId: targetedId });
+  }
+
   queue(profileId, options = {}) {
     const profile = this.store.jobHuntProfiles.findById(profileId);
     if (!profile) throw Object.assign(new Error("Perfil de busca não encontrado."), { code: "JOB_HUNT_PROFILE_NOT_FOUND" });
@@ -462,6 +525,9 @@ export class JobHuntService {
             [],
         }
       : null;
+    const autoApplyPolicy = this.store.autoApplyPolicy?.get() || {};
+    const thresholds = effectiveJobHuntThresholds(profile || {}, autoApplyPolicy);
+    const effectiveProfile = { ...profile, considerThreshold: thresholds.consider, prepareResumeThreshold: thresholds.prepareResume, notifyThreshold: thresholds.notify };
     if (!profile)
       throw Object.assign(new Error("Perfil de busca não encontrado."), {
         code: "JOB_HUNT_PROFILE_NOT_FOUND",
@@ -495,6 +561,7 @@ export class JobHuntService {
       profileId,
       triggerType,
     });
+    const failedRequests = [], providerFailures = new Map(), portalFailures = new Map();
     const startedAt = Date.now(),
       stats = {
         discoveryRunIds: [],
@@ -681,11 +748,22 @@ export class JobHuntService {
             errors: [],
           };
         providerMetrics.set(provider, metrics);
+        const portalKey = site => `${site}:${input.geographySurface || input.location || ""}`;
+        const requestSites = sites.filter(site => (portalFailures.get(portalKey(site)) || 0) < 2);
+        if (provider === "jobspy" && !requestSites.length) {
+          metrics.skippedRequests = (metrics.skippedRequests || 0) + 1;
+          return;
+        }
         const structuredTarget = provider !== "jobspy" && input.organizationKey,
           requestKey = structuredTarget
             ? `${provider}:${input.organizationKey}`
             : `${provider}:${input.query}:${input.location}:${input.geographySurface || ""}`;
         if (requestFingerprints.has(requestKey)) return;
+        if (!input.organizationKey && provider !== "jobspy" && (providerFailures.get(provider) || 0) >= 2) {
+          metrics.skippedRequests = (metrics.skippedRequests || 0) + 1;
+          recordLog({event:"PROVIDER_CIRCUIT_OPEN",level:"WARN",provider,status:"SKIPPED",message:"Consultas restantes desta fonte adiadas após falhas repetidas. Outras fontes continuam."});
+          return;
+        }
         requestFingerprints.add(requestKey);
         if(structuredTarget)input.queryProvenance={...(input.queryProvenance||{}),query:"",source:"ATS_BOARD_LIST",reason:"Board completo; query não aplicada pelo provider"};
         if (
@@ -722,7 +800,7 @@ export class JobHuntService {
         });
         if (provider === "jobspy")
           this.store.structuredLogs?.recordMany(
-            sites.map((site) => ({
+            requestSites.map((site) => ({
               ...logBase,
               event: "PORTAL_REQUEST_STARTED",
               message: "Consulta isolada ao portal iniciada.",
@@ -740,7 +818,7 @@ export class JobHuntService {
         try {
           const result = await this.discoveryService.discover({
             ...input,
-            sites,
+            sites: requestSites,
             limit: 50,
             queryProvenance: input.queryProvenance || null,
           });
@@ -755,8 +833,19 @@ export class JobHuntService {
           metrics.candidateResults += Number(result.jobs?.length || 0);
           metrics.newResults += Number(result.newCount || 0);
           metrics.duplicates += Number(result.duplicateCount || 0);
-          for(const sourceReport of result.sourceReports||[])for(const site of sourceReport.sites||[])metrics.sites.push(site);
+          const strategyAttempts = (result.sourceReports || []).flatMap(report => report.strategyAttempts || []);
+          if (strategyAttempts.length) {
+            metrics.strategyAttempts = [...(metrics.strategyAttempts || []), ...strategyAttempts].slice(-12);
+            metrics.alternativesExhausted = (result.sourceReports || []).some(report => report.alternativesExhausted);
+            for (const attempt of strategyAttempts) recordLog({ event: "PROVIDER_ACCESS_STRATEGY", provider, status: attempt.status, reasonCode: attempt.errorCode || "", message: `Estratégia pública: ${attempt.strategy}.` });
+          }
+          for(const sourceReport of result.sourceReports||[])for(const site of sourceReport.sites||[])metrics.sites.push({...site,recovery:discoveryRecovery(site.errorCode,site.status)});
           const portalReports=(result.sourceReports||[]).flatMap(item=>item.sites||[]);
+          for (const site of portalReports) {
+            const id = site.site || site.source;
+            if (["FAILED", "TIMED_OUT", "RATE_LIMITED"].includes(site.status)) portalFailures.set(portalKey(id), (portalFailures.get(portalKey(id)) || 0) + 1);
+            else portalFailures.delete(portalKey(id));
+          }
           this.store.structuredLogs?.recordMany(portalReports.map(site=>({
             ...logBase,
             event: site.status === "SUCCESS" || site.status === "NO_RESULTS" ? "PORTAL_REQUEST_SUCCEEDED" : site.status === "TIMED_OUT" ? "PORTAL_REQUEST_TIMED_OUT" : site.status === "RATE_LIMITED" ? "PORTAL_REQUEST_RATE_LIMITED" : "PORTAL_REQUEST_FAILED",
@@ -772,19 +861,26 @@ export class JobHuntService {
           })));
           const providerErrors = (result.sourceReports || [])
             .filter((item) =>
-              ["ERROR", "UNSUPPORTED", "OFFLINE", "FAILED", "TIMED_OUT", "RATE_LIMITED"].includes(item.status),
+              ["ERROR", "UNSUPPORTED", "OFFLINE", "FAILED", "TIMED_OUT", "RATE_LIMITED"].includes(item.status) || (item.errorCount > 0 && Boolean(item.errorCode)),
             )
             .map((item) => ({
               errorCode: item.errorCode || item.status || "DISCOVERY_FAILED",
             }));
           metrics.errors.push(...providerErrors);
+          if (providerErrors.length) {
+            providerFailures.set(provider, (result.sourceReports || []).some(report => report.alternativesExhausted) ? 2 : (providerFailures.get(provider) || 0) + 1);
+            metrics.recovery = discoveryRecovery(providerErrors[0].errorCode);
+            if (metrics.alternativesExhausted) metrics.recovery = { ...metrics.recovery, message: `${metrics.recovery.message} As alternativas públicas também falharam; esta fonte não será consultada novamente nesta rodada.` };
+            failedRequests.push({ ...input, sites, errorCode: providerErrors[0].errorCode, recovery: metrics.recovery });
+          } else providerFailures.delete(provider);
           metrics.errors.push(...portalReports.filter(item=>["FAILED","TIMED_OUT","RATE_LIMITED"].includes(item.status)).map(item=>({errorCode:item.errorCode||item.status})));
           if(portalReports.some(item=>["FAILED","TIMED_OUT","RATE_LIMITED"].includes(item.status)))stats.errors.push({stage:"PORTAL_DISCOVERY",providers:input.providers,errorCode:"PARTIAL_PORTAL_FAILURE"});
           metrics.status = metrics.errors.length
             ? result.jobs?.length
               ? "PARTIAL"
               : "ERROR"
-            : "CONSULTED";
+            : metrics.rawResults ? "CONSULTED" : "EMPTY";
+          if (metrics.status === "EMPTY") metrics.recovery = discoveryRecovery("", "EMPTY");
           if (!result.ok)
             stats.errors.push({
               stage: "DISCOVERY",
@@ -796,6 +892,9 @@ export class JobHuntService {
         } catch (error) {
           if (error.code === "USER_PAUSED") throw error;
           metrics.status = "ERROR";
+          providerFailures.set(provider, (providerFailures.get(provider) || 0) + 1);
+          metrics.recovery = discoveryRecovery(error.code);
+          failedRequests.push({ ...input, sites, errorCode: error.code || "DISCOVERY_FAILED", recovery: metrics.recovery });
           metrics.errors.push({
             errorCode: error.code || "DISCOVERY_FAILED",
           });
@@ -811,6 +910,7 @@ export class JobHuntService {
         persistProgress("DISCOVERY");
       };
       const requestGroups=[];
+      const configuredTargets=this.providerTargets(profile);
       for (const queryDetail of queryDetails){
         this.assertRunActive(run.id);
         const requests=[];
@@ -822,7 +922,7 @@ export class JobHuntService {
                 configuration?.enabled === false
                   ? null
                   : configuration?.identity,
-              targets = rotateProviderTargets((profile.providerTargets || []).filter(
+              targets = rotateProviderTargets(configuredTargets.filter(
                 (item) => item.provider === provider,
               ),Number(plannerState?.round||0)*Math.max(1,profile.queryBudget.maxQueriesPerProvider)),
               identities = targets.length
@@ -892,7 +992,9 @@ export class JobHuntService {
               queryProvenance: queryDetails[0] || null,
             });
         }
-      const canonicalJobs = uniqueById(jobs);
+      const identifiedJobs = uniqueById(jobs);
+      const canonicalJobs = distinctOpportunityJobs(identifiedJobs);
+      const semanticDuplicateCount = identifiedJobs.length - canonicalJobs.length;
       stats.canonicalCount = canonicalJobs.length;
       recordLog({event:"NORMALIZATION_COMPLETED",message:"Normalização das descobertas concluída.",status:"COMPLETED",resultCount:stats.rawCount});
       recordLog({event:"DEDUPLICATION_COMPLETED",message:"Deduplicação das oportunidades concluída.",status:"COMPLETED",resultCount:stats.canonicalCount,metadata:{duplicates:stats.duplicateCount}});
@@ -903,15 +1005,35 @@ export class JobHuntService {
           "default_resume_id",
           "",
         ),
-        resumes = storedResumes.length
-          ? storedResumes
+        resumes = storedResumes.some(resume => resume.id === defaultResumeId)
+          ? storedResumes.filter(resume => resume.id === defaultResumeId)
+          : storedResumes.length ? storedResumes
           : [{ id: null, text: "", sections: {} }],
         relevant = [];
+      const existingApplicationJobs = new Set(this.store.applications.all().map(item => item.jobId));
+      const existingApplicationKeys = new Set([...existingApplicationJobs].map(id => this.store.jobs.findById(id)).filter(Boolean).map(duplicateOpportunityKey).filter(Boolean));
+      let enrichedCount = 0, enrichmentDurationMs = 0;
       for (let jobIndex = 0; jobIndex < canonicalJobs.length; jobIndex++) {
         if (jobIndex && jobIndex % 10 === 0)
           await new Promise((resolve) => setImmediate(resolve));
         this.assertRunActive(run.id);
-        const job = canonicalJobs[jobIndex];
+        let job = canonicalJobs[jobIndex];
+        const enrichmentCandidate = ["gupy", "smartrecruiters"].includes(job.atsType || job.provider)
+          && !jobInformationQuality(job).sufficient && this.discoveryService.enrichJob
+          && enrichedCount < 30 && enrichmentDurationMs < 30_000
+          && !existingApplicationJobs.has(job.id) && !existingApplicationKeys.has(duplicateOpportunityKey(job));
+        if (enrichmentCandidate && this.preMatch.evaluate(job, {
+          families: profile.jobFamilies, seniorities: profile.seniorities, locationPolicy: profile.locationPolicy,
+        }).decision !== "REJECT") {
+          enrichedCount++;
+          const detailStarted = Date.now();
+          try { job = await this.discoveryService.enrichJob(job); }
+          catch (error) {
+            recordLog({event:"JOB_DETAIL_ENRICHMENT_FAILED",level:"WARN",jobId:job.id,provider:job.provider,reasonCode:error.code||"DETAIL_UNAVAILABLE",message:"Detalhes indisponíveis; a vaga permanece para revisão, sem envio automático."});
+          }
+          enrichmentDurationMs += Date.now() - detailStarted;
+          this.assertRunActive(run.id);
+        }
         const preMatch = this.preMatch.evaluate(job, {
           families: profile.jobFamilies,
           seniorities: profile.seniorities,
@@ -951,7 +1073,7 @@ export class JobHuntService {
           continue;
         }
         if (
-          this.store.applications.all().some((item) => item.jobId === job.id)
+          existingApplicationJobs.has(job.id) || existingApplicationKeys.has(duplicateOpportunityKey(job))
         ) {
           stats.filteredOutCount++;
           continue;
@@ -1002,7 +1124,7 @@ export class JobHuntService {
           confidence = Number(
             analysis.matchConfidence ?? priority.components.confidence ?? 100,
           );
-        opportunityDecisions.set(job.id,evaluateOpportunityDecision({job,analysis,preMatch,requirements:analysis.requirements||[],items:analysis.items||[],feedback,priority,policies:[profile],intent}));
+        opportunityDecisions.set(job.id,evaluateOpportunityDecision({job,analysis,preMatch,requirements:analysis.requirements||[],items:analysis.items||[],feedback,priority,policies:[effectiveProfile],intent}));
         const thresholdDecision = classifyThresholdScore(
           {
             technicalMatch,
@@ -1010,7 +1132,7 @@ export class JobHuntService {
             evidenceCoverage: coverage,
             confidence,
           },
-          { consider: profile.considerThreshold, priority: priorityThreshold },
+          { consider: thresholds.consider, priority: priorityThreshold },
         );
         if (
           thresholdDecision.filtered ||
@@ -1041,7 +1163,7 @@ export class JobHuntService {
         if (
           profile.prepareResume &&
           resume.id &&
-          technicalMatch >= profile.prepareResumeThreshold &&
+          technicalMatch >= thresholds.prepareResume &&
           coverage >= 50 &&
           confidence >= 40 &&
           this.prepareResume
@@ -1079,8 +1201,27 @@ export class JobHuntService {
       recordLog({event:"PREMATCH_COMPLETED",message:"Pré-match determinístico concluído.",status:"COMPLETED",resultCount:stats.passedPreMatchCount,metadata:{evaluated:stats.preMatchEvaluatedCount,rejected:stats.filteredOutCount}});
       recordLog({event:"DECISION_COMPLETED",message:"Decisões de oportunidade concluídas.",status:"COMPLETED",resultCount:relevant.length});
       persistProgress("DECISION");
+      // Routing by final ATS must not be capped by the WhatsApp instant-alert budget.
+      const routed = new Set();
+      if ((autoApplyPolicy.enabled || this.reviewOnly) && this.requestApproval) {
+        for (const item of relevant.filter(item => item.resumeStatus === "READY" && item.resumeVersionId)) {
+          this.assertRunActive(run.id);
+          try {
+            const result = await this.requestApproval({ ...item, profileId, jobHuntRunId: run.id, allowWhatsApp: false });
+            if (result?.handled === true) routed.add(item.job.id);
+          } catch (error) {
+            stats.errors.push({ stage: "AUTOAPPLY_ROUTING", jobId: item.job.id, errorCode: error.code || "AUTOAPPLY_ROUTING_FAILED" });
+          }
+        }
+      }
+      const delivery = profile.notificationPolicy.delivery;
+      const classes = profile.notificationPolicy.decisionClasses;
+      const notificationsEnabled = (!Array.isArray(delivery) || delivery.includes("WHATSAPP")) && classes?.length !== 0;
       const notify = relevant.filter(
-          (item) => item.priority.score >= profile.notifyThreshold,
+          (item) => !routed.has(item.job.id) && notificationsEnabled &&
+            (!Array.isArray(classes) || classes.includes(
+              opportunityDecisions.get(item.job.id)?.disposition === "PREPARE_ELIGIBLE" ? "RECOMMENDED" : opportunityDecisions.get(item.job.id)?.disposition)) &&
+            (autoApplyPolicy.enabled ? item.technicalMatch >= thresholds.notify : item.priority.score >= thresholds.notify),
         ),
         instant = notify.slice(0, profile.notificationPolicy.maxInstantAlerts),
         digest = notify.slice(profile.notificationPolicy.maxInstantAlerts);
@@ -1096,14 +1237,17 @@ export class JobHuntService {
         });
         const existingAlert = this.store.jobAlerts.findFingerprint(key);
         if (existingAlert) {
-          if (this.requestApproval && existingAlert.status !== "SENT" && item.resumeVersionId && item.resumeStatus === "READY") {
+          const retryDue = ["QUEUED", "QUIET_HOURS", "RETRYABLE"].includes(existingAlert.status) &&
+            (!existingAlert.nextDeliveryAt || Date.parse(existingAlert.nextDeliveryAt) <= Date.now());
+          if (retryDue && !isQuietHours(profile.notificationPolicy, now) && this.requestApproval && item.resumeVersionId && item.resumeStatus === "READY") {
             try {
               const approval = await this.requestApproval({ ...item, profileId, jobHuntRunId: run.id, jobAlertId: existingAlert.id });
               if (approval?.handled === true || approval?.sent === true) {
                 this.store.jobAlerts.mark(existingAlert.id, "SENT");
                 stats.alertCount++;
-              }
+              } else this.store.jobAlerts.retryDelivery(existingAlert.id);
             } catch (error) {
+              this.store.jobAlerts.retryDelivery(existingAlert.id);
               this.store.structuredLogs?.record({category:"AUTOMATION",level:"WARN",eventCode:"WHATSAPP_APPROVAL_RETRY_FAILED",jobId:item.job.id,resumeVersionId:item.resumeVersionId,errorCode:error.code||"WHATSAPP_APPROVAL_RETRY_FAILED",metadata:{jobHuntRunId:run.id}});
             }
           }
@@ -1145,7 +1289,9 @@ export class JobHuntService {
               const approval = await this.requestApproval({ ...item, profileId, jobHuntRunId: run.id, jobAlertId: alert.id });
               approvalSent = approval?.handled === true || approval?.sent === true;
               if (approvalSent) this.store.jobAlerts.mark(alert.id, "SENT");
+              else this.store.jobAlerts.retryDelivery(alert.id);
             } catch (error) {
+              this.store.jobAlerts.retryDelivery(alert.id);
               this.store.structuredLogs?.record({category:"AUTOMATION",level:"WARN",eventCode:"WHATSAPP_APPROVAL_PREPARATION_FAILED",jobId:item.job.id,resumeVersionId:item.resumeVersionId,errorCode:error.code||"WHATSAPP_APPROVAL_PREPARATION_FAILED",metadata:{jobHuntRunId:run.id}});
             }
           }
@@ -1287,11 +1433,14 @@ export class JobHuntService {
           coverage,
           rawCount: stats.rawCount,
           canonicalCount: stats.canonicalCount,
+          semanticDuplicateCount,
           relevantCount: humanDiscoveryCount,
           humanDiscoveryCount,
           automationEligibleCount: relevant.length,
           notifyCount: notify.length,
           priorityThreshold,
+          effectiveThresholds: thresholds,
+          autoApplyRoutedCount: routed.size,
           funnel,
           preMatchDecisions: preMatchDecisions.slice(0, 1000),
           opportunityDecisionCounts: Object.fromEntries(["BLOCKED","SKIP","STRETCH","REVIEW","RECOMMENDED","PREPARE_ELIGIBLE"].map(disposition=>[disposition,decisionCount(disposition)])),
@@ -1306,6 +1455,7 @@ export class JobHuntService {
           queryDiagnostics,
           recentDiscoveries: recentDiscoveries(),
           sourceReports,
+          failedRequests: failedRequests.slice(0, 240),
           errors: stats.errors,
         },
       });
@@ -1314,7 +1464,7 @@ export class JobHuntService {
       this.store.jobHuntProfiles.markRun(profileId, {
         lastRunAt: now.toISOString(),
         nextRunAt: profile.enabled
-          ? nextJobHuntRun(profile.schedule, now)
+          ? nextJobHuntRun(profile.schedule, new Date(Math.max(now.getTime(), Date.now())))
           : null,
       });
       this.eventBus?.emit("JOB_HUNT_COMPLETED", {
@@ -1363,5 +1513,16 @@ export class JobHuntService {
       this.running.delete(profileId);
       this.transientProviderTargets.delete(profileId);
     }
+  }
+
+  providerTargets(profile) {
+    if (profile.providerTargets?.length) return profile.providerTargets;
+    const watchlists = new Map((this.store.watchlists?.all() || [])
+      .filter(item => item.active !== false).map(item => [item.id, item]));
+    return (this.store.watchlists?.boards() || [])
+      .filter(board => board.enabled !== false && watchlists.has(board.watchlistId) &&
+        (!profile.companyWatchlistIds?.length || profile.companyWatchlistIds.includes(board.watchlistId)))
+      .sort((a,b) => Number(watchlists.get(b.watchlistId).priority || 50) - Number(watchlists.get(a.watchlistId).priority || 50))
+      .map(board => ({ provider: board.provider, organizationKey: board.organizationKey, company: board.company, careerUrl: board.careerUrl }));
   }
 }

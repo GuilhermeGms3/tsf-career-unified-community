@@ -13,6 +13,10 @@ O padrão geográfico da edição Community é **Portugal**: Lisboa, Porto, Brag
 
 ## O que já existe
 
+Atualizado em **23/10/2026**, a partir do estado atual do TSF. Esta atualização
+substitui a interface antiga da edição pública e incorpora os fluxos atuais,
+sem importar dados ou histórico Git da instalação pessoal.
+
 - Descoberta por agregadores, job boards e páginas públicas de ATS.
 - Planejamento de busca por família profissional, senioridade, localização e modalidade.
 - Deduplicação, atualização de vagas, qualidade da fonte e histórico de Mass Hunt.
@@ -24,6 +28,12 @@ O padrão geográfico da edição Community é **Portugal**: Lisboa, Porto, Brag
 - AutoApply e Controlled Submit com gates, idempotência e recibos nos destinos suportados.
 - Cofres de sessão separados das fontes públicas para portais que exigem login, MFA, CAPTCHA ou confirmação por e-mail.
 - Fallback humano para login, MFA, CAPTCHA, perguntas desconhecidas e confirmação incerta.
+- Central **Processos** com histórico de decisões e comandos do WhatsApp por vaga.
+- Menu do WhatsApp, perguntas pendentes, alteração de currículo e retomada de candidatura.
+- Rechecagem periódica de disponibilidade, distinguindo encerramento de falha de acesso.
+- Controle de ligar/pausar automação, modos de manutenção/manual e diagnóstico de falhas.
+- Gateway mobile para consultar vagas, PDFs, decisões e buscas no servidor por rede privada.
+- Reutilização contextual de respostas e homologação de submit por versão e cenário.
 
 > AutoApply e AutoSubmit ficam desativados por padrão. Uma candidatura só deve ser tratada como confirmada quando houver evidência ou recibo positivo.
 
@@ -44,6 +54,12 @@ docker compose up -d --build
 
 Abra [http://127.0.0.1:7123](http://127.0.0.1:7123).
 
+Na primeira execução, configure seu perfil, importe **seus próprios currículos**,
+escolha uma base aprovada e conecte suas fontes. GitHub, WhatsApp, LLM e sessões
+dos portais precisam de configuração própria. Não há currículo, conta ou sessão
+de outro usuário incluídos. O cliente Android é mantido separadamente; o gateway
+não instala um aplicativo no celular.
+
 Antes de ativar WhatsApp, automações ou submissão controlada, preencha somente no arquivo **.env** local os segredos necessários. Nunca envie esse arquivo ao Git.
 
 ### Atualizar uma instalação existente
@@ -61,6 +77,10 @@ docker compose up -d --force-recreate
 
 Confirme o commit instalado com `git rev-parse --short HEAD` antes de comparar a
 interface.
+
+Faça backup de `data/` e das chaves antes de atualizar uma instalação já usada:
+a inicialização aplica migrations do banco. Não apague volumes para atualizar.
+Detalhes desta entrega: [atualização Community](docs/community-release-2026-10-23.md).
 
 ## Configuração geográfica
 
@@ -106,7 +126,9 @@ Node.js API + domínio + SQLite
 
 ~~~powershell
 npm ci
+npx playwright install chromium
 npm run check:syntax
+node scripts/check-public-release.mjs
 npm test
 ~~~
 

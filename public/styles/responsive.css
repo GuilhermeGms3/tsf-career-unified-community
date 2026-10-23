@@ -235,6 +235,11 @@
   .operation-run > footer { align-items:flex-start; flex-direction:column; }
   .automation-truth-strip { grid-template-columns: 1fr auto; }
   .automation-truth-strip > div:nth-of-type(2) { grid-column: 1 / -1; }
+  .automation-master-control { grid-template-columns: 1fr; padding: 16px; }
+  .automation-master-actions { align-items: stretch; flex-direction: column; }
+  .automation-master-actions .button { width: 100%; }
+  .automation-master-control > .form-status,
+  .automation-master-control > small { grid-column: 1; }
   .opportunity-lifecycle-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .daily-overview { grid-template-columns:1fr; }
   .daily-brief,.daily-best-evidence,.triage-card,.today-intelligence,.tech-radar-list,.triage-rejection,.needs-attention { grid-template-columns:1fr; }

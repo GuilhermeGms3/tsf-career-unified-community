@@ -3,6 +3,7 @@ import { createReadStream } from "node:fs";
 import { mkdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { HubDatabase } from "../db/database.mjs";
+import { validateFormAnswer } from "../src/application/form-answer-format.mjs";
 import { AlertRepository } from "../repositories/alert-repository.mjs";
 import {
   ApplicationAttemptRepository,
@@ -15,7 +16,9 @@ import { JobRepository } from "../repositories/job-repository.mjs";
 import { ResumeRepository } from "../repositories/resume-repository.mjs";
 import { SearchScheduleRepository } from "../repositories/search-schedule-repository.mjs";
 import { WhatsappApprovalRepository } from "../repositories/whatsapp-approval-repository.mjs";
+import { WhatsappProcessRepository } from "../repositories/whatsapp-process-repository.mjs";
 import { WhatsappQuestionRepository } from "../repositories/whatsapp-question-repository.mjs";
+import { QuestionFallbackPolicyRepository } from "../repositories/question-fallback-policy-repository.mjs";
 import { normalizeApplicationStatus } from "../domain/application-status.mjs";
 import { ApplicationService } from "../domain/application-service.mjs";
 import { ApplicationPlanner } from "../src/application/application-planner.mjs";
@@ -102,6 +105,7 @@ import { CoverageBenchmarkRepository } from "../repositories/coverage-benchmark-
 import { ResumeBatchRepository } from "../repositories/resume-batch-repository.mjs";
 import { ApplicationBatchRepository, ApplicationAnswerLibrary } from "../repositories/application-batch-repository.mjs";
 import {
+  AutoApplyRunRepository,
   SubmissionAttemptRepository,
   SubmissionConsentRepository,
   SubmissionPreflightRepository,
@@ -113,6 +117,8 @@ import { CandidateKnowledgeMigrator } from "../src/candidate-knowledge/candidate
 import { CandidateKnowledgeService } from "../src/candidate-knowledge/candidate-knowledge-service.mjs";
 import { atomicWriteJson } from "./json-storage.mjs";
 import { isCurrentAtsAnalysis } from "../src/matching/analysis-version.mjs";
+import { ApplicationDecisionRepository } from "../repositories/application-decision-repository.mjs";
+import { ApplicationDecisionService } from "../src/application/application-decision-service.mjs";
 
 export const SQLITE_COLLECTIONS = Object.freeze([
   "jobs",
@@ -177,13 +183,16 @@ export class UnifiedStateStore {
     legacyStatePath = path.join(dataDir, "unified-state.json"),
     databasePath = path.join(dataDir, "career-hub.sqlite"),
     migrationsDir,
+    startupEffects = true,
   } = {}) {
     this.dataDir = dataDir;
     this.legacyStatePath = legacyStatePath;
     this.database = new HubDatabase(databasePath, {
       migrationsDir,
       ownerLease: true,
+      migrate: startupEffects,
     });
+    this.startupEffects = startupEffects;
     this.legacyState = defaultUnifiedState();
     this.legacyStateLoaded = false;
   }
@@ -220,7 +229,10 @@ export class UnifiedStateStore {
     this.candidateKnowledgeMigration = new CandidateKnowledgeMigrator({
       repository: this.candidateFacts,
       database: this.database,
-    }).migrateLegacyAggregates();
+    });
+    this.candidateKnowledgeMigration = this.startupEffects
+      ? this.candidateKnowledgeMigration.migrateLegacyAggregates()
+      : {skipped:true,reason:"MAINTENANCE"};
     this.greenhouseJobs = new GreenhouseJobMetadataRepository(connection);
     this.applicationInspections = new ApplicationInspectionRepository(
       connection,
@@ -236,6 +248,7 @@ export class UnifiedStateStore {
       this.database,
     );
     this.submissionReceipts = new SubmissionReceiptRepository(connection);
+    this.autoApplyRuns = new AutoApplyRunRepository(connection, this.database);
     this.intelligenceSettings = new IntelligenceSettingsRepository(connection);
     this.intelligenceRuns = new IntelligenceRunRepository(connection);
     this.intelligenceCache = new IntelligenceCacheRepository(connection);
@@ -283,7 +296,10 @@ export class UnifiedStateStore {
     this.outbox = new OutboxRepository(connection, this.database);
     this.integrationSettings = new IntegrationSettingsRepository(connection);
     this.whatsappApprovals = new WhatsappApprovalRepository(connection, this.database);
+    this.whatsappProcesses = new WhatsappProcessRepository(connection);
+    if (this.startupEffects) this.whatsappProcesses.recover();
     this.whatsappQuestions = new WhatsappQuestionRepository(connection);
+    this.questionFallbackPolicy = new QuestionFallbackPolicyRepository(this.database);
     this.autoApplyPolicy = new AutoApplyPolicyRepository(connection);
     this.jobHuntProfiles = new JobHuntProfileRepository(connection);
     this.jobHuntRuns = new JobHuntRunRepository(connection);
@@ -311,16 +327,20 @@ export class UnifiedStateStore {
     );
     this.discoveryV4 = new DiscoveryV4Repository(connection, this.database);
     this.structuredLogs = new StructuredLogRepository(connection);
-    for (const [providerId, capabilities] of Object.entries(
+    if (this.startupEffects) for (const [providerId, capabilities] of Object.entries(
       capabilityCatalog(),
     ))
       this.sourceCapabilities.replace(providerId, capabilities);
     this.automationRuns = new AutomationRunRepository(connection);
+    if (this.startupEffects) this.automationRuns.recover();
     this.jobFeedback = new JobFeedbackRepository(connection);
+    this.applicationDecisions = new ApplicationDecisionRepository(connection);
+    this.applicationDecisionService = new ApplicationDecisionService({store:this});
     this.decisionDismissals = new DecisionInboxDismissalRepository(connection);
     this.dailyReviewState = new DailyReviewStateRepository(connection);
     this.dailyInboxSnapshots = new DailyInboxSnapshotRepository(connection);
     this.dailyRefreshRuns = new DailyRefreshRunRepository(connection);
+    if (this.startupEffects) {
     this.dailyRefreshRuns.recover();
     this.jobHuntRuns.recover();
     await this.importLegacyStateIfChanged();
@@ -348,12 +368,13 @@ export class UnifiedStateStore {
     );
     if (hasSubmissionSchema) {
       this.submissionConsents.expireBefore();
-      for (const recovered of this.submissionAttempts.recoverExpired()) {
+      this.autoApplyRuns.recoverInterrupted();
+      for (const recovered of this.submissionAttempts.recoverInterrupted()) {
         const application = this.applications.findById(recovered.applicationId);
         if (application?.status === "SUBMITTING")
           this.applicationService.transitionApplication(
             application.id,
-            recovered.attempt.status === "UNCERTAIN"
+            recovered.attempt.status === "SUBMITTED" ? "SUBMITTED" : recovered.attempt.status === "UNCERTAIN"
               ? "SUBMISSION_UNCERTAIN"
               : "FAILED",
             {
@@ -363,7 +384,7 @@ export class UnifiedStateStore {
           );
         this.applications.recordEvent(
           recovered.applicationId,
-          recovered.attempt.status === "UNCERTAIN"
+          recovered.attempt.status === "SUBMITTED" ? "SUBMISSION_CONFIRMED" : recovered.attempt.status === "UNCERTAIN"
             ? "SUBMISSION_UNCERTAIN"
             : "SUBMISSION_FAILED",
           {
@@ -372,6 +393,7 @@ export class UnifiedStateStore {
           },
         );
       }
+    }
     }
     return this;
   }
@@ -556,6 +578,9 @@ export class UnifiedStateStore {
       .forApplication(applicationId)
       .find((item) => item.id === questionId);
     if (!current) throw new Error("Pergunta nao encontrada.");
+    const format = validateFormAnswer(current, value);
+    if (!format.valid) throw Object.assign(new Error(format.reason), { code: "QUESTION_ANSWER_FORMAT_INVALID", status: 400 });
+    value = format.value;
     const question = this.applicationQuestions.answer(
       applicationId,
       questionId,
@@ -687,10 +712,42 @@ export class UnifiedStateStore {
 
   async ensureLegacyStateLoaded() {
     if (this.legacyStateLoaded) return this.legacyState;
+    const compact = this.legacyAuxiliaryProjection();
+    if (compact) {
+      this.legacyState = {
+        ...defaultUnifiedState(),
+        ...compact,
+        ...this.searchProjection(),
+      };
+      this.legacyStateLoaded = true;
+      return this.legacyState;
+    }
     const { state } = await this.readLegacyFile();
-    this.legacyState = { ...state, ...this.searchProjection() };
+    const auxiliary = { generations: state.generations.slice(0, 100) };
+    this.database.setMetadata(
+      "legacy_auxiliary_projection",
+      JSON.stringify(auxiliary),
+    );
+    this.legacyState = {
+      ...defaultUnifiedState(),
+      ...auxiliary,
+      ...this.searchProjection(),
+    };
     this.legacyStateLoaded = true;
     return this.legacyState;
+  }
+
+  legacyAuxiliaryProjection() {
+    const row = this.database.connection
+      .prepare("SELECT value FROM app_metadata WHERE key='legacy_auxiliary_projection'")
+      .get();
+    if (!row?.value) return null;
+    try {
+      const parsed = JSON.parse(row.value);
+      return { generations: validCollection(parsed.generations).slice(0, 100) };
+    } catch {
+      return null;
+    }
   }
 
   searchProjection() {
@@ -812,6 +869,10 @@ export class UnifiedStateStore {
           createHash("sha256").update(raw).digest("hex"),
         );
       this.database.setMetadata("legacy_state_signature", signature);
+      this.database.setMetadata(
+        "legacy_auxiliary_projection",
+        JSON.stringify({ generations: state.generations.slice(0, 100) }),
+      );
       this.database.setMetadata("legacy_import_report", JSON.stringify(report));
     });
     return report;
@@ -923,7 +984,16 @@ export class UnifiedStateStore {
       searchHistory: state.searchHistory.slice(0, 50),
       portalReports: state.portalReports.slice(0, 50),
     }));
-    this.legacyState = state;
+    this.database.setMetadata("legacy_auxiliary_projection", JSON.stringify({
+      generations: state.generations.slice(0, 100),
+    }));
+    this.legacyState = {
+      ...defaultUnifiedState(),
+      generations: state.generations.slice(0, 100),
+      searchResults: state.searchResults.slice(0, 150),
+      searchHistory: state.searchHistory.slice(0, 50),
+      portalReports: state.portalReports.slice(0, 50),
+    };
     const persisted = await this.read();
     await atomicWriteJson(this.legacyStatePath, persisted);
     return persisted;

@@ -204,6 +204,7 @@ export class ResumeTailor {
     scoreEvaluator = null,
     userInstruction = "",
   }) {
+    await this.service.refreshAvailability?.();
     const allEvidence = mergeEvidence(evidence, resume),
       prioritizedEvidence = relevantEvidenceForJob(
         allEvidence,
@@ -384,6 +385,9 @@ export class ResumeTailor {
         providerFallbacks: responses.filter((item) => item.response.meta.fallback).length,
         variantCount: deterministic.length,
         selectedPerspective: selected.perspective,
+        generationMode: selected.id === "semantic-provider" ? "LLM" : selected.id === "unchanged" ? "BASE_UNCHANGED" : "OFFLINE_LIBRARY",
+        libraryVersion: selected.libraryVersion || "",
+        selectedDomain: selected.domain || "",
       },
     };
   }

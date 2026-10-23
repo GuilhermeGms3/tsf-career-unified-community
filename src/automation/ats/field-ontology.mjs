@@ -10,7 +10,7 @@ const rules = [
 ];
 
 export function mapSemanticField(field) {
-  const combined=[field.type,field.label,field.name,field.id,field.placeholder,field.ariaLabel,field.autocomplete,field.nearbyText].filter(Boolean).join(" ").normalize("NFD").replace(/\p{Diacritic}/gu,"").toLowerCase();
-  for(const [key,pattern,types] of rules) if(types.includes(field.type)&&pattern.test(combined)){const signals=[];if(pattern.test(String(field.label||"").normalize("NFD").replace(/\p{Diacritic}/gu,"").toLowerCase()))signals.push(`label=${field.label}`);if(field.autocomplete)signals.push(`autocomplete=${field.autocomplete}`);signals.push(`input[type=${field.type}]`);return {semanticKey:key,confidence:Math.min(0.99,0.82+signals.length*0.05),signals};}
+  const combined=[field.type,field.label,field.name,field.id,field.placeholder,field.ariaLabel,field.autocomplete].filter(Boolean).join(" ").normalize("NFD").replace(/\p{Diacritic}/gu,"").toLowerCase();
+  for(const [key,pattern,types] of rules) if(types.includes(field.type==="combobox"?"select-one":field.type)&&pattern.test(combined)){const signals=[];if(pattern.test(String(field.label||"").normalize("NFD").replace(/\p{Diacritic}/gu,"").toLowerCase()))signals.push(`label=${field.label}`);if(field.autocomplete)signals.push(`autocomplete=${field.autocomplete}`);signals.push(`input[type=${field.type}]`);return {semanticKey:key,confidence:Math.min(0.99,0.82+signals.length*0.05),signals};}
   return {semanticKey:"CUSTOM.QUESTION",confidence:0,signals:[]};
 }

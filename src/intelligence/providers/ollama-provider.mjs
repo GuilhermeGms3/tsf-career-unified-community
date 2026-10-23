@@ -1,6 +1,7 @@
 import { LlmProvider } from "./llm-provider.mjs";
+import { approvedLlmEndpoint } from "../../security/llm-endpoint-policy.mjs";
 
-function endpoint(value){const url=new URL(String(value||"http://localhost:11434"));if(!["http:","https:"].includes(url.protocol)||url.username||url.password)throw Object.assign(new Error("Endpoint Ollama invalido."),{code:"PROVIDER_MISCONFIGURED"});return url.toString().replace(/\/$/,"");}
+function endpoint(value){return approvedLlmEndpoint(String(value||"http://localhost:11434"));}
 function ollamaSchema(value){
   if(Array.isArray(value))return value.map(ollamaSchema);
   if(!value||typeof value!=="object")return value;
@@ -9,7 +10,7 @@ function ollamaSchema(value){
     key==="maxItems"?Math.min(16,Number(item)||16):key==="maxLength"?Math.min(2000,Number(item)||2000):ollamaSchema(item),
   ]));
 }
-async function jsonRequest(fetchImpl,url,options={},timeoutMs=10000){const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),timeoutMs);try{const response=await fetchImpl(url,{...options,signal:controller.signal});if(!response.ok)throw Object.assign(new Error(`Ollama respondeu ${response.status}.`),{code:"PROVIDER_ERROR",status:response.status});return await response.json();}catch(error){if(error.name==="AbortError")throw Object.assign(new Error("Ollama excedeu o timeout."),{code:"PROVIDER_TIMEOUT"});if(!error.code)error.code="PROVIDER_OFFLINE";throw error;}finally{clearTimeout(timer);}}
+async function jsonRequest(fetchImpl,url,options={},timeoutMs=10000){const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),timeoutMs);try{const response=await fetchImpl(url,{...options,redirect:"error",signal:controller.signal});if(!response.ok)throw Object.assign(new Error(`Ollama respondeu ${response.status}.`),{code:"PROVIDER_ERROR",status:response.status});return await response.json();}catch(error){if(error.name==="AbortError")throw Object.assign(new Error("Ollama excedeu o timeout."),{code:"PROVIDER_TIMEOUT"});if(!error.code)error.code="PROVIDER_OFFLINE";throw error;}finally{clearTimeout(timer);}}
 
 export class OllamaProvider extends LlmProvider{
   static type="ollama";

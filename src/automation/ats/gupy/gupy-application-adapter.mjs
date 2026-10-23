@@ -35,7 +35,8 @@ export class GupyApplicationAdapter extends GupyAdapter {
     const result=await this.validate(page,this.mapped(fields));
     // Native checkValidity alone does not prove the intended answer reached the control.
     for(const f of fields.filter(f=>!f.hidden&&isResolved(f))){
-      const frame=page.frames().find(x=>x.url()===f.binding.frameUrl)||page.mainFrame(),locator=this.locatorForField(frame,{...f,...f.binding});
+      let frame;try{frame=this.frameForField(page,f.binding);}catch{result.invalid.push(f.fieldId);continue;}
+      const locator=this.locatorForField(frame,{...f,...f.binding});
       const matches=await locator.evaluateAll((els,field)=>{
         if(!els.length)return false;const el=els[0],answers=Array.isArray(field.answer)?field.answer:[field.answer];
         if(field.type==="file")return el.files?.length===1;

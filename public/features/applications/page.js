@@ -65,7 +65,7 @@ const applicationTabs = [
   };
 export async function renderApplications({ root }) {
   const { applications = [], funnel = {} } = await api("/api/experience/applications"),
-    section = new URLSearchParams(location.search).get("section") || "overview";
+    section = new URLSearchParams(location.search).get("section") || "pending";
   const waiting = applications.filter((item) => item.pendingQuestions > 0 || ["WAITING_USER", "READY_TO_SUBMIT", "BLOCKED", "FAILED", "RETRYABLE"].includes(item.application.status)).length;
   const normalizedFunnel = {
     interested: funnel.interested || [],
@@ -76,20 +76,17 @@ export async function renderApplications({ root }) {
   };
   root.innerHTML = `<div class="page applications-page">${pageHeader({ eyebrow: "Seu funil", title: "Candidaturas", description: "Da vaga que chamou sua atenção ao envio e acompanhamento, sem perder o próximo passo." })}<section class="application-brief" aria-label="Resumo das candidaturas"><div><strong>${normalizedFunnel.interested.length}</strong><span>vagas de interesse</span></div><div><strong>${normalizedFunnel.prepared.length}</strong><span>com currículo preparado</span></div><div><strong>${normalizedFunnel.submitted.length}</strong><span>enviadas</span></div><div><strong>${waiting}</strong><span>precisam de você</span></div></section>${tabs(
     [
-      ["overview", "Visão geral"],
-      ["interest", `Eu aplicaria (${normalizedFunnel.interested.length})`],
-      ["resumes", `Currículos (${normalizedFunnel.prepared.length})`],
+      ["pending", `Precisa de você (${waiting})`],
       ["pipeline", "Em andamento"],
       ["submitted", `Enviadas (${normalizedFunnel.submitted.length})`],
-      ["pending", `Precisa de você (${waiting})`],
-      ["interviews", "Entrevistas"],
+      ["history", "Histórico"],
     ].map(([id, label]) => ({
       id,
       label,
       href: `/applications?section=${id}`,
     })),
     section,
-  )}<details class="page-secondary-navigation" ${["followups", "history"].includes(section) ? "open" : ""}><summary>Mais opções de acompanhamento</summary><nav aria-label="Opções avançadas de candidaturas"><a data-link href="/applications?section=followups">Retornos pendentes</a><a data-link href="/applications?section=history">Histórico e canceladas</a><a data-link href="/application-batches">Preparar várias candidaturas</a></nav></details>${applicationsSection(section, applications, normalizedFunnel)}</div>`;
+  )}<nav class="application-secondary-links" aria-label="Acompanhamento e preparação"><a data-link href="/applications?section=interest">Vagas de interesse</a><a data-link href="/applications?section=resumes">Currículos preparados</a><a data-link href="/applications?section=interviews">Entrevistas</a><a data-link href="/applications?section=followups">Retornos</a><a data-link href="/application-batches">Preparar em lote</a><a data-link href="/processes">Decisões no WhatsApp</a></nav>${applicationsSection(section, applications, normalizedFunnel)}</div>`;
   bindApplicationListActions(root);
 }
 function applicationsSection(section, applications, funnel) {
@@ -181,7 +178,7 @@ function funnelCard(item) {
     decision = { APPLY: "Aplicaria", REVIEW: "Talvez aplicaria", SAVE: "Salva" }[item.feedback?.userDecision],
     resumeState = item.resumeVersion ? `Currículo ${statusLabel(item.resumeVersion.status)}` : item.tailoring ? `Currículo ${statusLabel(item.tailoring.state)}` : "",
     score = item.tailoring && item.tailoring.tailoredScore !== null ? `${item.tailoring.originalScore ?? "?"}% → ${item.tailoring.tailoredScore}%` : "",
-    process = application ? statusLabel(application.status) : "";
+    process = application ? application.manualSent ? "Envio manual informado" : statusLabel(application.status) : "";
   return `<a class="application-funnel-card" data-link href="${href}"><span>${escapeHtml(job.company || "Empresa não informada")}</span><h3>${escapeHtml(job.title || "Oportunidade")}</h3><div>${decision ? pill(decision, "info") : ""}${resumeState ? pill(resumeState, item.tailoring?.quality?.allowed === false ? "critical" : "success") : ""}${process ? pill(process, application?.status === "SUBMITTED" ? "success" : "neutral") : ""}</div>${score ? `<p><strong>${score}</strong> compatibilidade</p>` : ""}<footer><small>${formatDate(item.updatedAt)}</small>${icon("arrow")}</footer></a>`;
 }
 function applicationRecords(
@@ -233,14 +230,15 @@ export async function renderApplicationWorkspace({ root, route }) {
     tab = applicationTabs.includes(route.tab) ? route.tab : "summary",
     a = w.application,
     job = w.job || {};
-  root.innerHTML = `<div class="workspace-page"><header class="workspace-header"><a class="back-link" data-link href="/applications">← Candidaturas</a><div class="workspace-title"><div><h1>${escapeHtml(job.title || "Candidatura")}</h1><p>${escapeHtml(job.company || "Empresa não informada")} · ${escapeHtml(statusLabel(a.status))}</p></div>${pill(statusLabel(a.status), a.status === "READY_TO_SUBMIT" ? "success" : ["WAITING_USER", "BLOCKED"].includes(a.status) ? "attention" : "neutral")}</div>${tabs(
-    applicationTabs.map((id) => ({
+  const processLabel = w.timeline?.some(event => event.eventType === "WHATSAPP_MANUAL_SUBMISSION_REPORTED") ? "Envio manual informado" : statusLabel(a.status);
+  root.innerHTML = `<div class="workspace-page"><header class="workspace-header"><a class="back-link" data-link href="/applications">← Candidaturas</a><div class="workspace-title"><div><h1>${escapeHtml(job.title || "Candidatura")}</h1><p>${escapeHtml(job.company || "Empresa não informada")} · ${escapeHtml(processLabel)}</p></div>${pill(processLabel, a.status === "READY_TO_SUBMIT" ? "success" : ["WAITING_USER", "BLOCKED"].includes(a.status) ? "attention" : "neutral")}</div>${tabs(
+    ["summary", "resume", "questions", "review", "timeline"].map((id) => ({
       id,
       label: labels[id],
       href: `/applications/${encodeURIComponent(a.id)}?tab=${id}`,
     })),
     tab,
-  )}</header><div class="workspace-body"><div class="workspace-columns"><section class="workspace-main">${renderTab(tab, w)}</section><aside class="context-rail">${applicationAction(w)}${methodPanel(w)}${readinessPanel(w)}</aside></div></div></div>`;
+  )}<nav class="application-secondary-links" aria-label="Ferramentas da candidatura">${["form","preflight","attempts"].map(id=>`<a data-link href="/applications/${encodeURIComponent(a.id)}?tab=${id}" ${tab===id?'aria-current="page"':""}>${labels[id]}</a>`).join("")}<a data-link href="/processes/${encodeURIComponent(job.id)}">Histórico WhatsApp</a></nav></header><div class="workspace-body"><div class="workspace-columns"><section class="workspace-main">${renderTab(tab, w)}</section><aside class="context-rail">${applicationAction(w)}</aside></div></div></div>`;
   bindApplicationActions(root, w);
   const questionId = new URLSearchParams(location.search).get("question");
   if (questionId)
@@ -258,13 +256,21 @@ function renderTab(tab, w) {
       preflight: preflightTab,
       review: finalReviewTab,
       attempts: attemptsTab,
-      timeline: timelineTab,
+      timeline: w => timelineTab(w) + trackingPanel(w),
     }[tab] || summaryTab
   )(w);
 }
 function summaryTab(w) {
   const a = w.application;
-  return `<section class="content-card"><div class="section-heading"><div><p class="eyebrow">Estado real</p><h2>${statusLabel(a.status)}</h2><p>${escapeHtml(a.nextAction || w.nextAction.reason)}</p></div></div><dl class="definition-grid"><div><dt>Método</dt><dd>${escapeHtml(statusLabel(w.method.method))}</dd></div><div><dt>ATS</dt><dd>${escapeHtml(w.method.atsType)}</dd></div><div><dt>Capacidade</dt><dd>${escapeHtml(w.method.capability.label)}</dd></div><div><dt>Currículo base</dt><dd>${escapeHtml(a.resumeId || "Não selecionado")}</dd></div><div><dt>Versão exata</dt><dd>${escapeHtml(a.resumeVersionId || "Não preparada")}</dd></div><div><dt>Análise vinculada</dt><dd>${escapeHtml(w.plan?.analysisId || "Ainda não vinculada")}</dd></div><div><dt>Próxima ação</dt><dd>${escapeHtml(w.nextAction.label)}</dd></div></dl></section>${w.plan ? `<section class="content-card"><h2>Decisão do planner</h2><div class="metric-grid"><article><small>Decisão</small><strong>${escapeHtml(w.plan.decision)}</strong><span>Revisão humana obrigatória</span></article><article><small>Compatibilidade técnica</small><strong>${w.plan.matchScore}%</strong><span>Career Unified</span></article><article><small>Elegibilidade</small><strong>${escapeHtml(statusLabel(w.plan.eligibility))}</strong><span>Separada do match</span></article></div>${list("Bloqueios", w.plan.blockingIssues)}${list("Alertas", w.plan.warnings)}</section>` : `<section class="action-empty"><h2>Plano ainda não criado</h2><p>Crie o plano para selecionar currículo, verificar elegibilidade e preparar o próximo passo.</p><button class="button primary" type="button" data-plan-application>Gerar plano</button></section>`}${trackingPanel(w)}`;
+  const manual = w.timeline.some(event=>event.eventType==="WHATSAPP_MANUAL_SUBMISSION_REPORTED"), terminal=["CANCELLED","SUBMITTED","SUBMISSION_UNCERTAIN","SUBMITTING"].includes(a.status);
+  const steps = [
+    ["resume","Currículo",["READY","APPROVED"].includes(w.resumeVersion?.status)],
+    ["questions","Perguntas",Boolean(w.inspection)&&!(w.questions||[]).some(item=>item.answerStatus==="USER_REQUIRED")],
+    ["preflight","Conferência",Boolean(w.submissionPreflight?.readyForConsent)],
+    ["review","Envio",a.status==="SUBMITTED"||manual],
+    ["timeline","Acompanhar",a.status==="SUBMITTED"||manual],
+  ];
+  return `<section class="application-journey"><p class="eyebrow">Situação atual</p><h2>${manual?"Envio manual informado por você":escapeHtml(statusLabel(a.status))}</h2><p>${escapeHtml(manual?"Sem recibo automático do portal. Acompanhe o retorno da empresa.":a.nextAction||w.nextAction.reason)}</p><ol class="application-stepper">${steps.map(([id,label,done],index)=>`<li class="${done?"is-complete":""}"><a data-link href="/applications/${encodeURIComponent(a.id)}?tab=${id}"><span>${done?icon("check"):index+1}</span>${label}</a></li>`).join("")}</ol><dl class="definition-grid"><div><dt>Portal</dt><dd>${escapeHtml(w.method.atsType||"Conclusão manual")}</dd></div><div><dt>Currículo</dt><dd>${w.resumeVersion?`Versão ${escapeHtml(a.resumeVersionId.slice(-8))}`:"Ainda não preparado"}</dd></div><div><dt>Envio</dt><dd>${manual?"Informado por você":w.submissionReceipt?"Recibo confirmado":a.status==="SUBMISSION_UNCERTAIN"?"Incerto: não repetir":"Sem envio confirmado"}</dd></div></dl>${!terminal&&!w.plan?'<button class="button primary" type="button" data-plan-application>Preparar próximo passo</button>':""}${w.plan?.blockingIssues?.length?list("O que precisa ser resolvido",w.plan.blockingIssues):""}<div class="button-row"><a class="button" data-link href="/opportunities/${encodeURIComponent(w.job.id)}">Ver vaga</a><a class="button quiet" data-link href="/applications/${encodeURIComponent(a.id)}?tab=timeline">Histórico e acompanhamento</a></div></section>`;
 }
 function trackingPanel(w) {
   const j = w.journey || {};
@@ -344,6 +350,13 @@ function list(title, items = []) {
   return `<div class="inline-list"><strong>${title}</strong>${items.length ? `<ul>${items.map((x) => `<li>${escapeHtml(humanText(typeof x === "string" ? x : x.message || x.code || "Detalhes disponíveis no diagnóstico"))}</li>`).join("")}</ul>` : "<p>Nenhum.</p>"}</div>`;
 }
 function bindApplicationActions(root, w) {
+  const tracking = root.querySelector(".tracking-actions");
+  if(tracking){
+    const forms=[...tracking.querySelectorAll("form")];
+    forms.forEach((form,index)=>form.hidden=index!==0);
+    tracking.insertAdjacentHTML("beforebegin",'<label class="tracking-choice"><span>Registrar no acompanhamento</span><select data-tracking-kind><option value="0">Etapa do processo</option><option value="1">Entrevista</option><option value="2">Contato ou retorno</option></select></label>');
+    root.querySelector("[data-tracking-kind]").addEventListener("change",event=>forms.forEach((form,index)=>form.hidden=index!==Number(event.target.value)));
+  }
   root.querySelectorAll("[data-application-action]").forEach((form) =>
     form.addEventListener("submit", async (event) => {
       event.preventDefault();

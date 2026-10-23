@@ -1,5 +1,6 @@
 import {createHash} from "node:crypto";
 import {canAutofillApplicationField} from "../candidate-knowledge/candidate-knowledge-policy.mjs";
+import {reusableApplicationLibraryAnswer,requiresApplicationConfirmation} from "./answer-reuse-policy.mjs";
 
 export const APPLICATION_FIELD_CATEGORIES=Object.freeze(["IDENTITY","CONTACT","LOCATION","EDUCATION","EXPERIENCE","SKILLS","LANGUAGE","SALARY_EXPECTATION","AVAILABILITY","WORK_AUTHORIZATION","CUSTOM_QUESTION","CONSENT","RESUME_UPLOAD","OTHER"]);
 export const ANSWER_STATES=Object.freeze(["ANSWERED_CONFIDENT","ANSWERED_USER_SAVED","ANSWERED_DERIVED","NEEDS_REVIEW","WAITING_USER","UNSUPPORTED","BLOCKED"]);
@@ -23,7 +24,7 @@ export function normalizeApplicationField(raw){
   else if(!APPLICATION_FIELD_CATEGORIES.includes(category))category="CUSTOM_QUESTION";
   const options=(raw.options||[]).map(o=>({value:String(o.value),label:String(o.label)}));
   const identity=category==="SALARY_EXPECTATION"&&semantic==="COMPENSATION.EXPECTED_SALARY"?semantic:[semantic,text];
-  return {fieldId:String(raw.externalKey),label,type:raw.type,required:Boolean(raw.required),options,normalizedSemanticType:semantic,category,source:raw.source||"DOM",confidence:semantic!==raw.semanticKey?1:Number(raw.confidence||0),answerState:"WAITING_USER",sensitive:Boolean(raw.sensitive),explicitOnly:Boolean(raw.sensitive||raw.consentType||["SALARY_EXPECTATION","AVAILABILITY","WORK_AUTHORIZATION"].includes(category)),hidden:Boolean(raw.hidden),questionIdentity:fingerprint([identity,raw.type,options]),binding:{selector:raw.selector,frameUrl:raw.frameUrl,externalKey:raw.externalKey}};
+  return {fieldId:String(raw.externalKey),label,type:raw.type,required:Boolean(raw.required),options,normalizedSemanticType:semantic,category,source:raw.source||"DOM",confidence:semantic!==raw.semanticKey?1:Number(raw.confidence||0),answerState:"WAITING_USER",sensitive:Boolean(raw.sensitive),explicitOnly:Boolean(raw.sensitive||raw.consentType||requiresApplicationConfirmation({semanticKey:semantic})||["SALARY_EXPECTATION","AVAILABILITY","WORK_AUTHORIZATION"].includes(category)),hidden:Boolean(raw.hidden),questionIdentity:fingerprint([identity,raw.type,options]),binding:{selector:raw.selector,frameUrl:raw.frameUrl,frameIndex:raw.frameIndex,externalKey:raw.externalKey}};
 }
 export function validateAnswer(field,value){
   if(typeof value!=="string"&&typeof value!=="boolean"&&typeof value!=="number"&&!Array.isArray(value))return false;
@@ -41,13 +42,15 @@ export function resolveApplicationFields(fields,{answers={},library,profile,know
     if(field.category==="RESUME_UPLOAD")return resumeVersion?{...field,answer:resumeVersion.id,answerState:"ANSWERED_CONFIDENT",answerProvenance:{source:"APPROVED_JOB_SPECIFIC_VERSION",versionId:resumeVersion.id}}:field;
     const explicit=answers[field.questionIdentity],saved=library?.find(field.questionIdentity),resumeValue=resumeFacts[field.normalizedSemanticType],fact=profile?.get(field.normalizedSemanticType)||knowledge?.get(field.normalizedSemanticType)||(resumeValue?{value:resumeValue,verified:true,verificationStatus:"IMPORTED_CONFIRMED",reusePolicy:"REUSABLE",source:"APPROVED_RESUME_VERSION"}:null);
     let value,source,state;
-    if(explicit){value=explicit.value;source="USER_CONFIRMED";state="ANSWERED_CONFIDENT";}
-    else if(saved&&field.category!=="CONSENT"&&!field.sensitive){value=saved.value;source="USER_CONFIRMED";state="ANSWERED_USER_SAVED";}
+    const extractive=explicit?.source==="LLM_EXTRACTIVE";
+    if(explicit&&!extractive){value=explicit.value;source="USER_CONFIRMED";state="ANSWERED_CONFIDENT";}
+    else if(extractive&&!field.explicitOnly&&!field.sensitive&&["text","textarea"].includes(field.type)&&["PROFESSIONAL.SKILL_EXPERIENCE","PROFESSIONAL.EXPERIENCE_SUMMARY"].includes(field.normalizedSemanticType)){value=explicit.value;source="LLM_EXTRACTIVE";state="ANSWERED_CONFIDENT";}
+    else if(reusableApplicationLibraryAnswer(field,saved)){value=saved.value;source="USER_CONFIRMED";state="ANSWERED_USER_SAVED";}
     else if(!field.explicitOnly&&field.confidence>=.85&&canAutofillApplicationField(fact,field)){value=fact.value;source=fact.source;state=source==="DERIVED_SAFE"?"ANSWERED_DERIVED":"ANSWERED_CONFIDENT";}
     if(value===undefined)return field;
     if(!validateAnswer(field,value))return {...field,answerState:"NEEDS_REVIEW"};
     const explicitConfirmation=source==="USER_CONFIRMED"&&(Boolean(explicit)||Boolean(saved));
-    const autofillAuthority=explicitConfirmation?{verificationStatus:"USER_CONFIRMED",verified:true}:fact;
+    const autofillAuthority=explicitConfirmation?{verificationStatus:"USER_CONFIRMED",verified:true}:source==="LLM_EXTRACTIVE"?{verificationStatus:"IMPORTED_CONFIRMED",verified:true,classification:"FACT",reusePolicy:"REUSABLE"}:fact;
     return {...field,answer:value,answerState:state,autofillAuthority,explicitConfirmation,answerProvenance:{source,semantic:field.normalizedSemanticType}};
   });
 }

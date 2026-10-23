@@ -45,8 +45,9 @@ test('readiness distingue capacidade, configuração, autenticação e disponibi
   assert.equal((await source('jobspy',{availabilityStatus:'UNAVAILABLE',setupType:'NONE'})).health,'UNAVAILABLE');
   const notConfigured=await source('github',{availabilityStatus:'AVAILABLE',setupType:'TOKEN',credentialStatus:'NOT_CONFIGURED',lastTest:checked},'NOT_CONFIGURED');
   assert.equal(notConfigured.configuration,'NOT_CONFIGURED');assert.equal(notConfigured.authentication,'NOT_CONFIGURED');assert.equal(notConfigured.availability,'AVAILABLE');assert.equal(notConfigured.operationalReadiness,'NOT_CONFIGURED');
-  const expired=await source('gupy',{availabilityStatus:'AVAILABLE',setupType:'ACCOUNT',lastTest:checked},'SESSION_EXPIRED');
+  const expired=await source('indeed',{availabilityStatus:'AVAILABLE',setupType:'ACCOUNT',lastTest:checked},'SESSION_EXPIRED');
   assert.equal(expired.authentication,'SESSION_EXPIRED');assert.equal(expired.operationalReadiness,'SESSION_EXPIRED');
+  assert.equal(expired.canDiscover,true);assert.equal(expired.canFill,false);assert.equal(expired.canSubmit,false);
   const disabled=await source('brave-public-web',{availabilityStatus:'DISABLED'});
   assert.equal(disabled.availability,'DISABLED');assert.equal(disabled.health,'DISABLED');assert.equal(disabled.operationalReadiness,'DISABLED');assert.equal(disabled.requiredForCoreProduct,false);
   const optionalOffline=await source('brave-public-web',{availabilityStatus:'UNAVAILABLE'});
@@ -103,7 +104,7 @@ test('Application Batch consumes readiness and injected owned session across two
   for(const id of ['A','B'])await service.openSession({id,applicationUrl:'https://fixture.gupy.io/candidates/jobs/42/apply'});assert.equal(opens,2);assert.equal(f.readiness.forApplication({applicationUrl:'https://other.gupy.io/jobs/1'}).canFill,true);assert.equal(f.store.applications.all().length,0);
 }));
 test('BrowserManager actually restores only supplied session in an isolated context',withFixture(async f=>{
-  const manager=new BrowserManager({dataDir:f.dir});const session=await manager.open('owned-test','attempt',{storageState:state(),trace:false});try{await session.context.route('**/*',route=>route.fulfill({contentType:'text/html',body:'<button>Sair</button>'}));await session.page.goto('https://fixture.gupy.io/candidates');assert.equal((await session.context.cookies('https://fixture.gupy.io'))[0].value,'fixture-session-only');assert.equal((await session.context.cookies('https://linkedin.com')).length,0);assert.equal(session.traceStopped,true);}finally{await manager.close(session,{traceStopped:true});}
+  const manager=new BrowserManager({allowLocalFixtures:true,dataDir:f.dir});const session=await manager.open('owned-test','attempt',{storageState:state(),trace:false});try{await session.context.route('**/*',route=>route.fulfill({contentType:'text/html',body:'<button>Sair</button>'}));await session.page.goto('https://fixture.gupy.io/candidates');assert.equal((await session.context.cookies('https://fixture.gupy.io'))[0].value,'fixture-session-only');assert.equal((await session.context.cookies('https://linkedin.com')).length,0);assert.equal(session.traceStopped,true);}finally{await manager.close(session,{traceStopped:true});}
 }));
 test('structured logs preserve cause chain, critical severity and redact before persistence and TXT',withFixture(async f=>{
   f.store.structuredLogs.record({category:'GUPY',provider:'gupy',eventCode:'FILL_FAILED',level:'CRITICAL',errorCode:'FORM_FIELD_NOT_FOUND',correlationId:'correlation-fixture',message:'password=red-secret Bearer red-bearer',metadata:{token:'red-token',cookie:'red-cookie',authorization:'red-auth',password:'red-password',storageState:{cookies:['red-storage']},answers:{salary:'red-salary'},cause:{code:'FORM_FIELD_NOT_FOUND'}}});

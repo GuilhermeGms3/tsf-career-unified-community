@@ -170,11 +170,16 @@ before(async () => {
 
   const hubPort = 18000 + (process.pid % 1000);
   hubUrl = `http://127.0.0.1:${hubPort}`;
-  hub = spawn(process.execPath, ["server.mjs"], {
+  // Only this fixture process permits its loopback form server. Production has
+  // no HTTP setting or environment switch that relaxes the browser policy.
+  const fixtureBootstrap=`import {BrowserManager} from './src/automation/browser/browser-manager.mjs';const open=BrowserManager.prototype.open;BrowserManager.prototype.open=function(...args){this.allowLocalFixtures=true;return open.apply(this,args);};await import('./server.mjs');`;
+  hub = spawn(process.execPath, ["--input-type=module", "-e", fixtureBootstrap], {
     cwd: projectRoot,
     windowsHide: true,
     env: {
       ...process.env,
+      NODE_ENV: "test",
+      CAREER_SUBMISSION_ENABLED: "false",
       HUB_HOST: "127.0.0.1",
       HUB_PORT: String(hubPort),
       HUB_DATA_DIR: dataDir,
@@ -1044,7 +1049,7 @@ test("Playwright valida branding, Policy Builder V2, oportunidades e ausência d
     const onboarding=page.locator("#product-onboarding");
     if(await onboarding.isVisible())await onboarding.getByRole("button",{name:"Pular configuração"}).click();
     await page.getByRole("link", { name: "Busca automática", exact: true }).click();
-    await page.getByRole("heading", { name: "Deixe o Career Unified procurar por você" }).waitFor();
+    await page.getByRole("heading", { name: "Onde e quando procurar" }).waitFor();
     await page.getByText("Configurações avançadas", { exact: true }).click();
     await page.getByRole("heading", { name: "Perfis de busca" }).waitFor();
     assert.equal(
@@ -1064,9 +1069,9 @@ test("Playwright valida branding, Policy Builder V2, oportunidades e ausência d
       assert.equal(await dialog.locator(`[name="${name}"]`).count(), 1);
     await dialog.getByRole("button", { name: "Fechar" }).click();
     await dialog.waitFor({ state: "hidden" });
-    const opportunities = await requestJson("/api/opportunities");
-    if (!opportunities.data.opportunities?.length) {
-      const created = await requestJson("/api/unified/job", {
+    let cards = await requestJson("/api/opportunities?view=cards&section=priority&offset=0&limit=30");
+    if (!cards.data.opportunities?.length) {
+      const created = await requestJson("/api/opportunities/analyze", {
         method: "POST",
         body: JSON.stringify({
           title: "Platform Engineer",
@@ -1078,9 +1083,10 @@ test("Playwright valida branding, Policy Builder V2, oportunidades e ausência d
         }),
       });
       assert.equal(created.response.status, 200);
+      cards = await requestJson("/api/opportunities?view=cards&section=priority&offset=0&limit=30");
     }
-    await page.reload();
-    await page.getByRole("link", { name: "Vagas", exact: true }).first().click();
+    assert.ok(cards.data.opportunities?.length, JSON.stringify(cards.data.pagination));
+    await page.goto(`${hubUrl}/opportunities?section=priority`);
     await page.locator(".opportunity-card").first().waitFor();
     const metricsText = await page
       .locator(".opportunity-card .opportunity-signals")

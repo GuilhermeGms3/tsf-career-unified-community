@@ -1,7 +1,7 @@
 import { sourceOnboardingRegistry } from '../discovery/source-center/source-onboarding-registry.mjs';
 import { APPLICATION_ADAPTER_CAPABILITIES } from '../automation/ats/adapter-registry.mjs';
 import {GUPY_CAPABILITY_TRUTH} from '../application/gupy-capability-truth.mjs';
-import {SESSION_PROVIDER_IDS} from './session-provider-registry.mjs';
+import {SESSION_PROVIDER_IDS,sessionProviders} from './session-provider-registry.mjs';
 export const CAPABILITIES=Object.freeze(['DISCOVERY','JOB_DETAILS','DESCRIPTION_ENRICHMENT','RECRUITER_POST_CAPTURE','EVIDENCE_SYNC','APPLICATION_PARSE','APPLICATION_FILL','RESUME_UPLOAD','READY_TO_SUBMIT','CONTROLLED_SUBMIT','AUTH_SESSION_REUSE']);
 const publicDiscovery=new Set(['jobspy','indeed','linkedin','glassdoor','google','greenhouse','lever','ashby','smartrecruiters','workable','gupy','iel','programathor','solides','recrutei','nerdin','remotar']);
 const authRequired=new Set(['NOT_CONFIGURED','AUTH_REQUIRED','SESSION_EXPIRED']);
@@ -24,6 +24,7 @@ const healthFor=availability=>({AVAILABLE:'READY',LIMITED:'LIMITED',UNAVAILABLE:
 // Projection of current onboarding and adapter registries; not a second discovery engine.
 export function connectionCapabilities(){
   const entries=[...sourceOnboardingRegistry.list(),...['indeed','linkedin','glassdoor','google'].map(id=>({providerId:id,displayName:{indeed:'Indeed',linkedin:'LinkedIn',glassdoor:'Glassdoor',google:'Google Jobs'}[id],description:'Descoberta pública limitada via JobSpy.'})),{providerId:'workday',displayName:'Workday',description:'Preenchimento assistido por etapa e sessão por tenant; envio final manual.'},{providerId:'generic',displayName:'Páginas de carreira',description:'Inspeção genérica limitada; compatibilidade por página.'}];
+  for(const provider of sessionProviders())if(!entries.some(entry=>entry.providerId===provider.id))entries.push({providerId:provider.id,displayName:provider.name,description:provider.notes||'Sessao isolada; preenchimento assistido e envio manual.'});
   return entries.map(item=>{
     const id=item.providerId,a=APPLICATION_ADAPTER_CAPABILITIES[id],c=Object.fromEntries(CAPABILITIES.map(k=>[k,'NOT_SUPPORTED']));
     if(publicDiscovery.has(id)){c.DISCOVERY='SUPPORTED_LIMITED';c.JOB_DETAILS='SUPPORTED_LIMITED';}

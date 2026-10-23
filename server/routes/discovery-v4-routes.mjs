@@ -13,6 +13,7 @@ export function createDiscoveryV4Routes({
   const webhookHits = new Map(),
     webhookLimit = 120,
     webhookWindowMs = 60_000;
+  const webhookRuntime = { received: 0, lastReceivedAt: null, lastCompletedAt: null, lastOutcome: null, lastErrorCode: null, lastEvent: null, lastMessageShape: null };
   return async function discoveryV4Routes(req, res, url) {
     try {
       if (
@@ -193,6 +194,7 @@ export function createDiscoveryV4Routes({
         json(res, {
           ok: true,
           webhook: await evolutionService.webhookStatus(),
+          runtime: { ...webhookRuntime },
         });
         return true;
       }
@@ -221,10 +223,24 @@ export function createDiscoveryV4Routes({
             { code: "COMMUNITY_WEBHOOK_RATE_LIMITED", status: 429 },
           );
         const body = await readJson(req);
-        const secret = req.headers["x-career-webhook-secret"] || "",
-          approval = await approvalGateway.ingest(body, secret),
-          result = approval.handled ? approval : communityService.ingest(body, secret);
-        json(res, { ok: true, ...result }, 202);
+        const secret = req.headers["x-career-webhook-secret"] || "";
+        approvalGateway.verifySecret?.(secret);
+        webhookRuntime.received++;
+        webhookRuntime.lastReceivedAt = new Date().toISOString();
+        const event = String(body.event || "").toUpperCase().replace(/[.-]/g, "_");
+        webhookRuntime.lastEvent = ["MESSAGES_UPSERT", "MESSAGES_UPDATE", "MESSAGES_SET", "SEND_MESSAGE", "CONNECTION_UPDATE"].includes(event) ? event : "OTHER";
+        webhookRuntime.lastMessageShape = { array: Array.isArray(body.data), hasKey: Boolean(body.data?.key), hasMessage: Boolean(body.data?.message), hasText: Boolean(body.data?.message?.conversation || body.data?.message?.extendedTextMessage?.text || body.data?.body || body.data?.text) };
+        try {
+          const approval = await approvalGateway.ingest(body, secret),
+            result = approval.handled ? approval : communityService.ingest(body, secret);
+          webhookRuntime.lastCompletedAt = new Date().toISOString();
+          webhookRuntime.lastOutcome = result.outcome || (result.handled ? "HANDLED" : "IGNORED");
+          webhookRuntime.lastErrorCode = null;
+          json(res, { ok: true, ...result }, 202);
+        } catch (error) {
+          webhookRuntime.lastErrorCode = String(error.code || "WEBHOOK_PROCESSING_FAILED").slice(0, 80);
+          throw error;
+        }
         return true;
       }
     } catch (error) {

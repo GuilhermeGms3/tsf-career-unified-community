@@ -30,6 +30,7 @@ export class AtsDetector {
       if(signals.length)return {type:candidate.type,confidence:signals.length>1?.96:.9,signals,applicationSupport:"ASSISTED_FILL"};
     }
     const nativePlatforms=[
+      ["empregare",/(^|\.)empregare\.com$/i],
       ["iel",/(^|\.)carreiras\.iel\.org\.br$/i],
       ["solides",/(^|\.)(vagas\.solides\.com\.br|solides\.jobs)$/i],
       ["recrutei",/(^|\.)recrutei\.com\.br$/i],

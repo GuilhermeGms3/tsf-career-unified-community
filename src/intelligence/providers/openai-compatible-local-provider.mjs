@@ -1,18 +1,16 @@
 import { LlmProvider } from "./llm-provider.mjs";
+import { approvedLlmEndpoint } from "../../security/llm-endpoint-policy.mjs";
 
 function localEndpoint(value) {
-  const url = new URL(String(value || "http://127.0.0.1:1234/v1"));
-  if (!["localhost", "127.0.0.1", "[::1]", "host.docker.internal"].includes(url.hostname) || !["http:", "https:"].includes(url.protocol) || url.username || url.password)
-    throw Object.assign(new Error("Endpoint local OpenAI-compatible inválido."), { code: "PROVIDER_MISCONFIGURED" });
-  return url.toString().replace(/\/$/, "");
+  return approvedLlmEndpoint(String(value || "http://127.0.0.1:1234/v1"));
 }
 
 async function request(fetchImpl, url, options = {}, timeoutMs = 30000) {
   const controller = new AbortController(), timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetchImpl(url, { ...options, signal: controller.signal });
+    const response = await fetchImpl(url, { ...options, redirect:"error", signal: controller.signal });
     if (!response.ok) throw Object.assign(new Error(`Servidor local respondeu ${response.status}.`), { code: "PROVIDER_ERROR", status: response.status });
-    return response.json();
+    return await response.json();
   } catch (error) {
     if (error.name === "AbortError") throw Object.assign(new Error("Servidor local excedeu o timeout."), { code: "PROVIDER_TIMEOUT" });
     if (!error.code) error.code = "PROVIDER_OFFLINE";

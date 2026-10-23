@@ -14,10 +14,45 @@ import {AshbyAdapter} from "../src/automation/ats/ashby/ashby-adapter.mjs";
 import {SmartRecruitersAdapter} from "../src/automation/ats/smartrecruiters/smartrecruiters-adapter.mjs";
 import { CandidateKnowledgeBase } from "../src/application/candidate-knowledge-base.mjs";
 import { BrowserManager } from "../src/automation/browser/browser-manager.mjs";
-import { detectChallenge, resolveInspectionHealth, validateAutomationUrl, validateSelectedResume } from "../src/automation/application-engine.mjs";
+import { classifyAutomationFailure, detectChallenge, resolveInspectionHealth, validateAutomationUrl, validateSelectedResume } from "../src/automation/application-engine.mjs";
 import {formStructureHash} from "../src/application/form-structure-hash.mjs";
 
 const fixtures=path.resolve(import.meta.dirname,"fixtures","ats");let browser;
+test("retomada entra em abertura recuperavel sem liberar estados terminais", async () => {
+  const { canTransitionApplication } = await import("../domain/application-status.mjs");
+  assert.equal(canTransitionApplication("WAITING_USER", "OPENING_PAGE"), true);
+  assert.equal(canTransitionApplication("OPENING_PAGE", "FAILED"), true);
+  for (const state of ["CANCELLED", "SUBMITTED", "SUBMISSION_UNCERTAIN"])
+    assert.equal(canTransitionApplication(state, "OPENING_PAGE"), false);
+});
+test("inspecao relê DOM uma vez se navegacao destruir o contexto", async () => {
+  const adapter = new GenericAdapter();
+  let calls = 0, waits = 0;
+  adapter.inspectFormSnapshot = async () => {
+    if (++calls === 1) throw new Error("Execution context was destroyed, most likely because of a navigation");
+    return { fields: [{ semanticKey: "CONTACT.EMAIL" }] };
+  };
+  const result = await adapter.inspectApplicationForm({ waitForLoadState: async () => { waits++; } });
+  assert.equal(result.fields.length, 1);
+  assert.equal(calls, 2);
+  assert.equal(waits, 1);
+});
+test("releitura do DOM nao entra em loop nem engole erro desconhecido", async () => {
+  for (const message of ["Execution context was destroyed", "Unexpected failure"]) {
+    const adapter = new GenericAdapter();
+    let calls = 0;
+    adapter.inspectFormSnapshot = async () => { calls++; throw new Error(message); };
+    await assert.rejects(adapter.inspectApplicationForm({ waitForLoadState: async () => {} }), new RegExp(message));
+    assert.equal(calls, message.includes("context") ? 2 : 1);
+  }
+});
+test("falhas temporarias sao distintas de restricao, pergunta e layout", () => {
+  for (const code of ["PORTAL_TEMPORARILY_UNAVAILABLE", "ETIMEDOUT", "ERR_CONNECTION_RESET"])
+    assert.equal(classifyAutomationFailure({ code }), "RETRYABLE");
+  for (const code of ["PORTAL_ACCESS_RESTRICTED", "PORTAL_RATE_LIMITED", "CAPTCHA_REQUIRED", "REQUIRED_FIELD_UNKNOWN"])
+    assert.equal(classifyAutomationFailure({ code }), "USER_REQUIRED");
+  assert.equal(classifyAutomationFailure({ code: "ADAPTER_UNSUPPORTED_LAYOUT" }), "UNSUPPORTED");
+});
 const open=async(name)=>{const page=await browser.newPage();await page.goto(pathToFileURL(path.join(fixtures,name)).href);return page};
 const kb=CandidateKnowledgeBase.fromProfile({personal:{fullName:"Ana Silva",email:"ana@example.test",phone:"61999999999",country:"Brasil",city:"Brasilia",linkedin:"https://linkedin.com/in/ana"},career:{workAuthorized:true,salaryExpectation:"8000"}});
 before(async()=>{browser=await chromium.launch({headless:true})});after(async()=>browser.close());
@@ -52,7 +87,7 @@ test("FILL_ONLY nunca dispara submit",async()=>{const p=await open("greenhouse-b
 test("validacao completa reconhece formulario preenchido",async()=>{const p=await open("greenhouse-basic.html");const a=new GreenhouseAdapter();const x=a.mapFields(await a.inspectApplicationForm(p),kb);await a.fill(p,x);assert.equal((await a.validate(p,x)).valid,true);await p.close()});
 test("validacao impede required desconhecido",async()=>{const p=await open("greenhouse-unknown-required.html");const a=new GreenhouseAdapter();const x=a.mapFields(await a.inspectApplicationForm(p),kb);assert.equal((await a.validate(p,x)).valid,false);await p.close()});
 test("upload usa exatamente o arquivo informado",async()=>{const dir=await mkdtemp(path.join(os.tmpdir(),"hub-upload-"));const file=path.join(dir,"resume.txt");await writeFile(file,"resume correto");const p=await open("greenhouse-upload.html");const a=new GreenhouseAdapter();let x=a.mapFields(await a.inspectApplicationForm(p),kb).map(f=>({...f,answer:"resume-1",answerStatus:"KNOWN"}));await a.fill(p,x,{resumePath:file});assert.equal((await p.locator("#resume").evaluate(el=>el.files[0].name)),"resume.txt");await p.close();await rm(dir,{recursive:true,force:true})});
-test("BrowserManager gera evidência estrutural sem snapshots DOM sensíveis",async()=>{const dir=await mkdtemp(path.join(os.tmpdir(),"hub-evidence-"));const manager=new BrowserManager({dataDir:dir,headless:true});const s=await manager.open("app/unsafe","attempt:1");await s.page.setContent("<form><input type=password value=fixture-secret><input type=email value=ana@example.test></form>");const shot=await manager.screenshot(s,"start");await manager.close(s);const trace=await readFile(path.join(s.evidencePath,"trace.zip"));assert.ok((await readFile(shot)).length>0);assert.ok(trace.length>0);assert.equal(trace.includes(Buffer.from("fixture-secret")),false);assert.equal(trace.includes(Buffer.from("ana@example.test")),false);await rm(dir,{recursive:true,force:true})});
+test("BrowserManager gera evidência estrutural sem snapshots DOM sensíveis",async()=>{const dir=await mkdtemp(path.join(os.tmpdir(),"hub-evidence-"));const manager=new BrowserManager({allowLocalFixtures:true,dataDir:dir,headless:true});const s=await manager.open("app/unsafe","attempt:1");await s.page.setContent("<form><input type=password value=fixture-secret><input type=email value=ana@example.test></form>");const shot=await manager.screenshot(s,"start");await manager.close(s);const trace=await readFile(path.join(s.evidencePath,"trace.zip"));assert.ok((await readFile(shot)).length>0);assert.ok(trace.length>0);assert.equal(trace.includes(Buffer.from("fixture-secret")),false);assert.equal(trace.includes(Buffer.from("ana@example.test")),false);await rm(dir,{recursive:true,force:true})});
 test("curriculo bloqueia path traversal",async()=>{const dir=await mkdtemp(path.join(os.tmpdir(),"hub-path-"));const outside=path.join(dir,"outside.txt");await writeFile(outside,"x");await assert.rejects(validateSelectedResume({storedPath:outside},dir),e=>e.code==="RESUME_PATH_NOT_ALLOWED");await rm(dir,{recursive:true,force:true})});
 test("curriculo selecionado valida extensao, raiz e tamanho",async()=>{const dir=await mkdtemp(path.join(os.tmpdir(),"hub-resume-"));const folder=path.join(dir,"resumes");await import("node:fs/promises").then(fs=>fs.mkdir(folder));const file=path.join(folder,"selected.txt");await writeFile(file,"ok");assert.equal(await validateSelectedResume({storedPath:file},dir),file);await rm(dir,{recursive:true,force:true})});
 test("navegacao bloqueia file URL e aceita HTTP local",()=>{assert.throws(()=>validateAutomationUrl("file:///etc/passwd"),e=>e.code==="APPLICATION_URL_NOT_ALLOWED");assert.equal(validateAutomationUrl("http://127.0.0.1/form"),"http://127.0.0.1/form")});

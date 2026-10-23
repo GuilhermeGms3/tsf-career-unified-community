@@ -5,6 +5,7 @@ import {
 import { classifyRequirementCriticality, REQUIREMENT_CRITICALITIES } from "../matching/requirement-criticality.mjs";
 import { classifyRequirementGap, GAP_STATUSES } from "../matching/gap-engine.mjs";
 import { isCurrentAtsAnalysis } from "../matching/analysis-version.mjs";
+import { jobInformationQuality } from "../matching/job-information-quality.mjs";
 
 export const OPPORTUNITY_DISPOSITIONS = Object.freeze(["BLOCKED", "SKIP", "STRETCH", "REVIEW", "RECOMMENDED", "PREPARE_ELIGIBLE"]);
 export { classifyRequirementCriticality, classifyRequirementGap, REQUIREMENT_CRITICALITIES, GAP_STATUSES };
@@ -89,6 +90,7 @@ export function evaluateOpportunityDecision(input = {}, options = {}) {
   const gaps = (input.items || []).map((item) => classifyRequirementGap(item, { familyFit, intent }));
   const hardBlockers = [];
   const warnings = [];
+  if (!jobInformationQuality(job).sufficient) warnings.push("JOB_DESCRIPTION_INSUFFICIENT");
   const thresholds = resolveOpportunityThresholds(policies, input.thresholds);
   const currentAnalysis = isCurrentAtsAnalysis(analysis);
   const addBlock = (value) => { if (value && !hardBlockers.includes(value)) hardBlockers.push(value); };

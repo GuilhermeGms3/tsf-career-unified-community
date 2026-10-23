@@ -12,8 +12,10 @@ WORKDIR /engine
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY service.py linkedin_enrichment.py ./
+COPY service.py contracts.py document_extraction.py document_generation.py job_search.py linkedin_enrichment.py ./
 
+ARG TSF_REVISION=unknown
+LABEL org.opencontainers.image.revision=$TSF_REVISION
 EXPOSE 7130
 
 CMD ["uvicorn", "service:app", "--host", "0.0.0.0", "--port", "7130"]

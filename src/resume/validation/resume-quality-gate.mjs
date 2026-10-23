@@ -27,6 +27,9 @@ const malformed = (value) =>
   /\b(undefined|null|lorem ipsum|n\/a)\b/i.test(value);
 const hasArtifactMarkup = (value) => /```|#{3,}|[{}]\s*"[A-Za-z]/.test(value);
 const hasRoboticProse = (value) => /\b(?:re[uú]ne conhecimentos comprovados|direcionad[oa]s? a|trajet[oó]ria re[uú]ne|base aplic[aá]vel a desafios|combina base t[eé]cnica|para contribuir em)\b/i.test(value);
+const hasCompiledSummary = value => /profissional de tecnologia/i.test(value) &&
+  /viv[eê]ncia com|atua[cç][aã]o voltada/i.test(value);
+const hasFirstPersonSummary = value => /\b(?:eu|minha|meus|tenho|trabalhei|atuei|desenvolvi|automatizei)\b/i.test(value);
 const targetTerms=job=>normalized(job?.title).split(/[^a-z0-9+#.]+/).filter(term=>term.length>=4&&!new Set(["analista","junior","pleno","senior","estagio"]).has(term));
 
 export class ResumeQualityGate{
@@ -36,7 +39,7 @@ export class ResumeQualityGate{
     check("SUMMARY_PRESENT",resumeSummary.length>=60,"BLOCK",`${resumeSummary.length} caracteres`);
     check("SUMMARY_CONCISE",resumeSummary.length<=750,"BLOCK",`${resumeSummary.length} caracteres`);
     check("SUMMARY_FORMAT",!malformed(resumeSummary),"BLOCK");
-    check("NATURAL_PROSE",!hasRoboticProse([resumeSummary,...resumeBullets].join("\n")),"REVIEW");
+    check("NATURAL_PROSE",!hasRoboticProse([resumeSummary,...resumeBullets].join("\n"))&&!hasCompiledSummary(resumeSummary)&&!hasFirstPersonSummary(resumeSummary),"REVIEW");
     check("NO_GENERATION_ARTIFACTS",!hasArtifactMarkup([resumeSummary,...resumeBullets].join("\n")),"BLOCK");
     check("EXPERIENCE_BULLETS_PRESENT",resumeBullets.length>0,"BLOCK",`${resumeBullets.length} itens`);
     check("NO_DUPLICATE_BULLETS",uniqueBullets.size===resumeBullets.length,"BLOCK",`${resumeBullets.length-uniqueBullets.size} repetidos`);

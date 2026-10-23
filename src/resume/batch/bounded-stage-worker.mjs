@@ -7,6 +7,7 @@ export class BoundedStageWorker {
     workerId = `resume-batch-${process.pid}`,
     pollIntervalMs = 1000,
     onError = null,
+    claimOptions = {},
   } = {}) {
     Object.assign(this, {
       repository,
@@ -15,6 +16,7 @@ export class BoundedStageWorker {
       workerId,
       pollIntervalMs,
       onError,
+      claimOptions,
     });
     this.concurrency = Math.max(1, Math.min(8, Math.floor(Number(concurrency) || 1)));
     this.running = 0;
@@ -47,7 +49,7 @@ export class BoundedStageWorker {
       while (this.running < this.concurrency) {
         const item = this.repository.claim(
           this.status,
-          `${this.workerId}-${this.status.toLowerCase()}-${this.running + 1}`,
+          `${this.workerId}-${this.status.toLowerCase()}-${this.running + 1}`, this.claimOptions,
         );
         if (!item) break;
         this.running += 1;

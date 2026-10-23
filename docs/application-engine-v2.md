@@ -16,9 +16,16 @@ O runtime instala `AdapterSubmissionTransport`. Greenhouse, Lever, Ashby, SmartR
 - `submission_receipts` só nasce após confirmação positiva do provider.
 - `application_events` permanece append-only e registra a jornada.
 - `SUBMISSION_UNCERTAIN` impede retry cego quando o clique pode ter ocorrido.
+- `auto_apply_runs` torna o despacho anterior ao submit idempotente entre reinicios do Hub.
+- Cada consentimento guarda a origem e a referencia da autorizacao, vinculadas por hash a candidatura e a `ResumeVersion` exata.
+- Na inicializacao, tentativa interrompida em `PRE_ACTION` falha de modo recuperavel; depois da acao externa vira `UNCERTAIN`; recibo existente prevalece como `SUBMITTED`.
 
 ## Capability real
 
 Greenhouse, Lever, Ashby, SmartRecruiters, Workable e Nerdin chegam a `CONTROLLED_SUBMIT` com `canSubmit=true`. O Nerdin usa seu formulário público nativo em três etapas. Gupy V1 chega a `READY_TO_SUBMIT_MANUAL`, enquanto o Application Batch dedicado da Gupy aplica seus próprios gates de submit. Generic não submete. Workday inspeciona e preenche a etapa corrente, mas exige handoff para autenticação, transições e envio final.
 
 Validação: `npm run application:v2:validate`.
+
+## Continuidade operacional
+
+A migration 053 adiciona proveniencia verificavel ao consentimento e o claim persistente do AutoApply. O lease exclusivo do `dataDir` garante um unico Hub escritor; a recuperacao de inicializacao ocorre antes de novos workers aceitarem trabalho. Essa protecao nao transforma capability declarada em homologacao externa: cada portal ainda exige comprovacao real do formulario e recibo antes de ser descrito como envio confirmado.

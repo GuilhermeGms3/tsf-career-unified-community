@@ -17,7 +17,7 @@ test("navegação agrupada preserva rotas raiz e deep links existentes",()=>{
 test("grupos preservam todas as abas e usam rótulos de produto",()=>{
   const paths=navigation.map(item=>item.path);
   for(const path of ["/","/opportunities","/applications","/resumes","/knowledge","/autopilot","/connections","/vaults","/observability","/settings"])assert.ok(paths.includes(path));
-  assert.deepEqual(navigationGroups.find(group=>group.label==="Trabalho").items.map(item=>item.label),["Hoje","Vagas","Candidaturas","Currículos"]);
+  assert.deepEqual(navigationGroups.find(group=>group.label==="Trabalho").items.map(item=>item.label),["Hoje","Vagas","Candidaturas","Processos","Currículos"]);
   assert.deepEqual(navigationGroups.find(group=>group.label==="Automação").items.map(item=>item.label),["Busca automática","WhatsApp","Fontes","Cofres"]);
   assert.equal(navigationGroups.some(group=>/Discovery|Evidence|Intelligence/.test(group.label)),false);
 });

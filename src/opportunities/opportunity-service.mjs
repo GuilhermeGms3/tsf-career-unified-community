@@ -1,8 +1,10 @@
 import { createHash } from "node:crypto";
 import { OpportunityDecisionPolicyV2 } from "./opportunity-decision-policy-v2.mjs";
 import { calculateOpportunityPriority } from "./opportunity-priority.mjs";
+import { preferenceLearning } from "./preference-learning.mjs";
 import { duplicateOpportunityKey, opportunityFreshness } from "./opportunity-freshness.mjs";
 import { buildProviderQualityReport } from "../discovery/provider-quality-service.mjs";
+import { jobInformationQuality } from "../matching/job-information-quality.mjs";
 import {
   classifyFreshness,
   classifyGeography,
@@ -61,6 +63,7 @@ function consolidateDuplicates(items) {
     group.sort((left, right) =>
       Number(Boolean(right.application)) - Number(Boolean(left.application)) ||
       Number(right.freshness.current) - Number(left.freshness.current) ||
+      Number((right.job.description || "").length >= 100) - Number((left.job.description || "").length >= 100) ||
       right.priority.score - left.priority.score ||
       timestamp(right.job.lastCheckedAt || right.job.lastSeenAt) - timestamp(left.job.lastCheckedAt || left.job.lastSeenAt));
     const representative = group[0];
@@ -169,6 +172,7 @@ function compactSummary({
           evidenceCoverage: analysis.evidenceCoverage,
           matchConfidence: analysis.matchConfidence,
           confidenceBand: analysis.confidenceBand,
+          jobInformation: jobInformationQuality(job),
           matched: (analysis.matched || []).slice(0, 3),
         }
       : null,
@@ -297,6 +301,7 @@ export class OpportunityService {
     const latestAnalysis = latestBy(analyses, (item) => item.jobId);
     const applications = new Map(this.store.applications.all().map((item) => [item.jobId, item]));
     const feedback = new Map(this.store.jobFeedback.all().map((item) => [item.jobId, item]));
+    const learned = preferenceLearning(jobs, [...feedback.values()]);
     const notified = new Set(this.store.jobAlerts.list().filter((item) => item.notificationCount > 0 || item.status === "SENT").map((item) => item.jobId));
     const policies = this.store.jobHuntProfiles.all();
     const activePolicy = policies.find((item) => item.enabled) || policies[0] || null;
@@ -317,7 +322,12 @@ export class OpportunityService {
     const initialQualityReport = buildProviderQualityReport({ jobs, analyses, requirementsByJob, providerDiagnostics, extractMissingRequirements: false });
     const qualityByProvider = new Map(initialQualityReport.providers.map((item) => [item.providerId, item]));
     const qualityByPortal = new Map(initialQualityReport.sourcePortals.map((item) => [item.sourcePortal, item]));
-    const projected = jobs.map((job) => {
+    const intentByProfile = new Map(policies.map(policy => [policy.id,
+      this.store.searchIntents?.forProfile?.(policy.id) || { profileId: policy.id, version: policy.searchIntentVersion || 0, originalIntent: { jobFamilies: policy.jobFamilies || [] }, families: policy.jobFamilies || [], seniorities: policy.seniorities || [], locationPolicy: policy.locationPolicy || {} },
+    ]));
+    const projected = [];
+    for (const [jobIndex, job] of jobs.entries()) {
+      if (jobIndex % 25 === 0) await new Promise(resolve => setImmediate(resolve));
       const analysis = latestAnalysis.get(job.id) || null;
       const currentFeedback = feedback.get(job.id) || null;
       const application = applications.get(job.id) || null;
@@ -333,7 +343,7 @@ export class OpportunityService {
           family === classifiedFamily.primaryJobFamily || classifiedFamily.secondaryJobFamilies.includes(family)));
       const originPolicy = policies.find((item) => item.id === preMatch?.profileId) || familyPolicy || activePolicy;
       const usedFallback = !preMatch?.profileId || !policies.some((item) => item.id === preMatch.profileId);
-      const intent = originPolicy ? this.store.searchIntents?.forProfile?.(originPolicy.id) || { profileId: originPolicy.id, version: originPolicy.searchIntentVersion || 0, originalIntent: { jobFamilies: originPolicy.jobFamilies || [] }, families: originPolicy.jobFamilies || [], seniorities: originPolicy.seniorities || [], locationPolicy: originPolicy.locationPolicy || {} } : {};
+      const intent = originPolicy ? intentByProfile.get(originPolicy.id) : {};
       const evaluationPreMatch = {
         ...basePreMatch,
         seniority: basePreMatch.seniority || classifySeniority(job).seniority,
@@ -348,10 +358,17 @@ export class OpportunityService {
       const sourcePortal = String(job.discoveredVia || job.portal || job.provider || job.source || "unknown").toLowerCase();
       const sourceQuality = qualityByPortal.get(sourcePortal) || qualityByProvider.get(technicalProvider) || null;
       const priority = calculateOpportunityPriority({ job, analysis, requirements, items, profile, jobHuntPolicies: scopedPolicies, feedback: currentFeedback, application, notified: notified.has(job.id), sourceQuality, preMatch: evaluationPreMatch, intent });
+      const learnedSignal = learned.get(classifyJobFamily({ title: job.title }).primaryJobFamily);
+      if (learnedSignal?.adjustment && !currentFeedback) {
+        priority.score = Math.max(0, Math.min(100, priority.score + learnedSignal.adjustment));
+        priority.level = priority.score >= 80 ? "HIGH" : priority.score >= 60 ? "MEDIUM" : "LOW";
+        priority.components.learnedPreferenceAdjustment = learnedSignal.adjustment;
+        priority.reasons.push(`Preferência aprendida de decisões anteriores: ajuste leve de ${learnedSignal.adjustment} ponto(s), sem alterar ATS ou elegibilidade.`);
+      }
       const contextProvenance = { source: usedFallback ? (familyPolicy ? "FAMILY_PROFILE_FALLBACK" : "LEGACY_ACTIVE_PROFILE_FALLBACK") : "JOB_HUNT_RUN", usedFallback, profileId: originPolicy?.id || "", searchIntentId: preMatch?.searchIntentId || intent?.id || "", searchIntentVersion: preMatch?.searchIntentVersion || intent?.version || 0, jobHuntRunId: preMatch?.jobHuntRunId || "" };
       const decision = this.decisionPolicy.evaluate({ job, analysis, preMatch: evaluationPreMatch, requirements, items, feedback: currentFeedback, application, priority, policies: scopedPolicies, intent, contextProvenance });
-      return { job: { ...job, technicalProvider, sourcePortal, sourceQuality }, analysis, preMatch, requirements, items, feedback: currentFeedback, application, priority, decision, freshness: opportunityFreshness(job) };
-    });
+      projected.push({ job: { ...job, technicalProvider, sourcePortal, sourceQuality }, analysis, preMatch, requirements, items, feedback: currentFeedback, application, priority, decision, freshness: opportunityFreshness(job) });
+    }
     const projection = consolidateDuplicates(projected)
       .sort((left, right) =>
         Number(["BLOCKED", "SKIP"].includes(left.decision?.disposition)) - Number(["BLOCKED", "SKIP"].includes(right.decision?.disposition)) ||
@@ -420,6 +437,7 @@ export class OpportunityService {
         evidenceCoverage: analysis.evidenceCoverage,
         matchConfidence: analysis.matchConfidence,
         confidenceBand: analysis.confidenceBand,
+        jobInformation: jobInformationQuality(job),
         eligibility: analysis.eligibility,
         matched: (analysis.matched || []).slice(0, 3),
         updatedAt: analysis.updatedAt,

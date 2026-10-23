@@ -5,6 +5,7 @@ export function currentRoute() {
   for (const [name, pattern] of [
     ["opportunity", /^\/opportunities\/([^/]+)$/],
     ["application", /^\/applications\/([^/]+)$/],
+    ["process", /^\/processes\/([^/]+)$/],
     ["resume", /^\/resumes\/([^/]+)$/],
     ["resume-batch", /^\/resume-batches\/([^/]+)$/],
     ["application-batch", /^\/application-batches\/([^/]+)$/],
@@ -27,6 +28,7 @@ export function currentRoute() {
     "/autopilot": "autopilot",
     "/resumes": "resumes",
     "/applications": "applications",
+    "/processes": "processes",
     "/application-batches": "application-batches",
     "/knowledge": "knowledge",
     "/settings": "settings",

@@ -25,7 +25,26 @@ O limite é uma autorização permanente para iniciar o fluxo, não uma remoçã
 
 Falha do LM Studio/Ollama, compilador, Evolution ou WhatsApp não cria candidatura fictícia nem perde a vaga. O alerta permanece observável e o envio do pedido pode ser retomado. Uma notificação simples do n8n não marca o pedido de PDF como concluído.
 
+O Mass Hunt é a autoridade das suas entregas: callbacks de renderização de versões `MASS_HUNT_AUTOAPPLY` não disparam um segundo envio fora de quiet hours, pausa e orçamento. A busca agendada reutiliza esse mesmo serviço, targets e limites efetivos. A nota global pode baixar o piso preliminar de preparação, mas nunca remove os gates editoriais ou obriga a preparar quando a opção estiver desligada.
+
+Pedidos de PDF adiados ou com falha transitória têm retomada limitada no timer. Perguntas `PREPARED` podem reenviar sem gerar outra sugestão; escalonamentos simultâneos compartilham a mesma execução. A falha de uma confirmação textual não impede a retomada de um handoff. Confirmações de decisão/resultado ainda não possuem outbox próprio de retry durável: falhas são registradas, e um novo comando de decisão recebe confirmação sem repetir a transição. O orçamento curto da sugestão libera o fallback WhatsApp, mas o cancelamento da inferência subjacente depende do cliente LLM.
+
 ## Autoridade da aprovação
+
+Antes de abrir o formulario, o AutoApply consulta a disponibilidade publica
+atual pelo servico existente. Encerramento confirmado cancela a candidatura
+nao enviada, preserva PDF/historico e notifica no WhatsApp "Vaga encerrada no
+portal" com a vaga e o link. Timeout, bloqueio ou resposta inconclusiva deixam
+a candidatura aguardando verificacao, sem declarar expiracao e sem preencher.
+O preflight manual tambem bloqueia vagas ja marcadas CLOSED. Idade de 30 dias
+nao e prova de encerramento. A checagem publica nao substitui a revalidacao
+autoritativa do adapter imediatamente antes do submit.
+
+O aviso generico ADAPTER_UNSUPPORTED_LAYOUT de uma tentativa anterior nao e
+retroativamente reescrito. Quando o encerramento e identificado depois,
+uma correcao explicita pode ser enviada, sem reproduzir a aprovacao ou tentar
+preencher de novo. Candidaturas enviadas/incertas ou com submit em andamento
+nao sao canceladas durante a espera da verificacao HTTP.
 
 O pedido é ligado a uma candidatura, vaga, versão imutável do currículo, artefato PDF e destino WhatsApp. O webhook exige segredo, instância, conversa e remetente autorizados. A aprovação inicia o fluxo, mas não ignora preflight fresh, respostas obrigatórias, autenticação, challenge, idempotência ou confirmação externa.
 

@@ -1,3 +1,4 @@
+import { publicUrl } from "../security/public-url-policy.mjs";
 import { SourceResolver } from "./source-resolver.mjs";
 
 const APPLY_TEXT = /\b(apply|application|aplicar|candidate-se|candidatar|candidatura|inscreva-se|quero essa vaga|enviar curr[ií]culo)\b/i;
@@ -39,9 +40,7 @@ const visibleText = (value) =>
 
 export function safeApplicationUrl(value, baseUrl = "") {
   try {
-    const url = baseUrl ? new URL(String(value || ""), baseUrl) : new URL(String(value || ""));
-    const host = url.hostname.toLowerCase(), octets = host.split(".").map(Number), privateIpv4 = octets.length === 4 && octets.every(Number.isInteger) && (octets[0] === 10 || octets[0] === 127 || (octets[0] === 169 && octets[1] === 254) || (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) || (octets[0] === 192 && octets[1] === 168));
-    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || host === "localhost" || host.endsWith(".localhost") || host === "[::1]" || host.startsWith("[fc") || host.startsWith("[fd") || host.startsWith("[fe80:") || privateIpv4) return "";
+    const url=publicUrl(baseUrl?new URL(String(value||""),baseUrl):value);
     url.hash = "";
     return url.toString();
   } catch {

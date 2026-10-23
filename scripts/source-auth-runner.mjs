@@ -53,9 +53,15 @@ export async function openIsolatedChrome({chromium,directory,wait=ms=>new Promis
     }};
   }catch(error){await browser?.close().catch(()=>{});if(child.exitCode===null)child.kill();throw error;}
 }
-export async function runSourceAuth(handoff,{fetchImpl=fetch,loadChromium=async()=> (await import('playwright')).chromium,wait=ms=>new Promise(resolve=>setTimeout(resolve,ms)),launchBrowser=openIsolatedChrome}={}){
+export function authServerOrigin(port,serverOrigin=''){
+  if(!serverOrigin)return `http://127.0.0.1:${port}`;
+  const url=new URL(serverOrigin);
+  if(url.protocol!=='https:'||!url.hostname.endsWith('.ts.net')||url.username||url.password||url.search||url.hash||url.pathname!=='/'||String(url.port||443)!==String(port))throw Error('AUTH_SERVER_ORIGIN_INVALID');
+  return url.origin;
+}
+export async function runSourceAuth(handoff,{serverOrigin='',fetchImpl=fetch,loadChromium=async()=> (await import('playwright')).chromium,wait=ms=>new Promise(resolve=>setTimeout(resolve,ms)),launchBrowser=openIsolatedChrome}={}){
   const {id,ticket,port}=parseAuthHandoff(handoff);
-  const endpoint=`http://127.0.0.1:${port}/api/connections/handoff/${id}`;
+  const endpoint=`${authServerOrigin(port,serverOrigin)}/api/connections/handoff/${id}`;
   const post=async(action,body)=>{const response=await fetchImpl(`${endpoint}/${action}`,{method:'POST',headers:{'content-type':'application/json',authorization:`Bearer ${ticket}`},body:JSON.stringify(body),signal:AbortSignal.timeout(30000),redirect:'error'});if(!response.ok)throw Error('AUTH_HANDOFF_FAILED');return response.json();};
   let managed,context,directory,failureCode='CLAIM_FAILED';
   try{
@@ -97,5 +103,6 @@ export async function runSourceAuth(handoff,{fetchImpl=fetch,loadChromium=async(
   }
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
-  runSourceAuth(process.argv[2]).then(result=>{if(result.status!=='SESSION_ACTIVE')process.exitCode=1;}).catch(()=>{process.exitCode=1;});
+  const serverOrigin=process.argv[3]==='--server-origin'?process.argv[4]:'';
+  runSourceAuth(process.argv[2],{serverOrigin}).then(result=>{if(result.status!=='SESSION_ACTIVE')process.exitCode=1;}).catch(()=>{process.exitCode=1;});
 }

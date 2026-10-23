@@ -1,4 +1,5 @@
 import { HostedAtsAdapter } from "../hosted/hosted-ats-adapter.mjs";
+import { captureSubmissionConfirmation, waitForSubmissionConfirmation } from "../../submission-confirmation.mjs";
 import { buildDomSignature } from "../greenhouse/dom-signature.mjs";
 import { assessAdapterHealth } from "../greenhouse/adapter-health.mjs";
 
@@ -14,8 +15,11 @@ export class TeamtailorAdapter extends HostedAtsAdapter {
 
   async exposeForm(page) {
     if (await page.locator(`${APPLICATION_FORM} input:not([type=hidden]), ${APPLICATION_FORM} textarea, ${APPLICATION_FORM} select`).count()) return;
-    const triggers = page.getByRole("button", { name: /apply|candidatar|inscreva-se/i })
-      .or(page.getByRole("link", { name: /apply|candidatar|inscreva-se/i }));
+    const reject=page.getByRole("button",{name:/decline all non-necessary cookies|rejeitar.*cookies/i});
+    if(await reject.count()&&await reject.first().isVisible().catch(()=>false))await reject.first().click();
+    const triggers = page.getByRole("button", { name: /apply|candidat(?:ar|a-se|e-se)|inscreva-se/i })
+      .or(page.getByRole("link", { name: /apply|candidat(?:ar|a-se|e-se)|inscreva-se/i }));
+    await triggers.first().waitFor({state:"visible",timeout:5000}).catch(()=>{});
     for (let index = 0; index < await triggers.count(); index++) {
       const trigger = triggers.nth(index);
       if (!await trigger.isVisible().catch(() => false)) continue;
@@ -32,7 +36,7 @@ export class TeamtailorAdapter extends HostedAtsAdapter {
     const inspected = await super.inspectApplicationForm(page, context), fields = inspected.fields
       .filter((field) => /^candidate(?:_|\[)/i.test(field.externalKey))
       .map((field) => {
-        const required = !field.hidden && (field.required || /(?:\*|\b)required\b/i.test(field.label));
+        const required = !field.hidden && (field.required || /\*|\brequired\b|obrigat[oó]ri[oa]/i.test(field.label));
         const resumeField = field.type === "file" && field.externalKey === "candidate_resume_remote_url";
         const semanticKey = resumeField ? "RESUME.FILE" : field.semanticKey;
         const confidence = resumeField ? 0.99 : field.semanticKey === "CUSTOM.QUESTION" && field.label ? Math.max(field.confidence, 0.7) : field.confidence;
@@ -52,11 +56,11 @@ export class TeamtailorAdapter extends HostedAtsAdapter {
     return { ...inspected, fields, schema };
   }
 
-  async findSubmitBoundary(page) {
+  async findSubmitBoundary(page, {requireEnabled=true} = {}) {
     const candidates = page.locator(`${APPLICATION_FORM} button[type='submit'], ${APPLICATION_FORM} input[type='submit']`), matching = [];
     for (let index = 0; index < await candidates.count(); index++) {
       const candidate = candidates.nth(index);
-      if (!await candidate.isVisible().catch(() => false) || await candidate.isDisabled().catch(() => true)) continue;
+      if (!await candidate.isVisible().catch(() => false) || requireEnabled && await candidate.isDisabled().catch(() => true)) continue;
       const label = String(await candidate.getAttribute("value") || await candidate.textContent() || "").trim();
       if (/submit application|send application|apply for this job|enviar candidatura|enviar inscri[cç][aã]o|finalizar candidatura/i.test(label)) matching.push(candidate);
     }
@@ -69,30 +73,13 @@ export class TeamtailorAdapter extends HostedAtsAdapter {
   }
 
   async submit(page, { onActionTriggered = async () => {}, confirmationTimeoutMs = 10000 } = {}) {
-    const boundary = await this.findSubmitBoundary(page), beforeUrl = page.url();
+    const boundary = await this.findSubmitBoundary(page), baseline = await captureSubmissionConfirmation(page);
     await onActionTriggered();
     try {
       await boundary.click();
     } catch (error) {
       throw Object.assign(new Error("Falha ao acionar o boundary final Teamtailor."), { code: "TEAMTAILOR_SUBMIT_CLICK_FAILED", phase: "POST_ACTION", cause: error });
     }
-    const success = page.getByText(/application (has been )?(received|submitted)|thank you for (your application|applying)|successfully applied|candidatura (foi )?enviada|inscri[cç][aã]o (foi )?enviada/i).first();
-    let confirmationKind = "";
-    try {
-      await Promise.race([
-        success.waitFor({ state: "visible", timeout: confirmationTimeoutMs }).then(() => { confirmationKind = "SUCCESS_TEXT"; }),
-        page.waitForURL((url) => url.href !== beforeUrl && /(thank|confirm|application|submitted|success)/i.test(url.pathname + url.search), { timeout: confirmationTimeoutMs }).then(() => { confirmationKind = "CONFIRMATION_URL"; }),
-      ]);
-    } catch {}
-    if (!confirmationKind) return { status: "UNCERTAIN", errorCode: "TEAMTAILOR_CONFIRMATION_NOT_OBSERVED" };
-    const confirmationText = await success.textContent().catch(() => "");
-    return {
-      status: "SUBMITTED",
-      receipt: {
-        confirmationUrl: page.url(),
-        confirmationText: confirmationText || "Teamtailor application confirmation observed",
-        metadata: { confirmationKind, providerStatus: "SUBMITTED" },
-      },
-    };
+    return waitForSubmissionConfirmation(page, { baseline, provider: this.type, timeoutMs: confirmationTimeoutMs });
   }
 }

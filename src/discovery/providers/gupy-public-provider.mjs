@@ -28,6 +28,17 @@ export class GupyPublicProvider{
   async search(){return {jobs:[],diagnostic:await this.health()};}
   organization(value){const key=cleanOrganization(value);if(!organizationPattern.test(key)||reservedOrganizations.has(key))throw Object.assign(new Error("Identidade pública Gupy inválida."),{code:"GUPY_PUBLIC_BOARD_IDENTITY_INVALID"});return key;}
   async listCompanyJobs({organizationKey,company="",limit=50}){const key=this.organization(organizationKey),expectedHost=`${key}.gupy.io`,{data,url}=await this.client.getText(`https://${expectedHost}/`,{maxBytes:1000000});if(new URL(url).hostname!==expectedHost)throw Object.assign(new Error("A página Gupy redirecionou para outro tenant."),{code:"GUPY_PUBLIC_BOARD_REDIRECTED"});return parseGupyPublicBoard(data,{organizationKey:key,company,limit});}
-  async resolveJob(job){return normalizeDiscoveryJob(job);}
+  async resolveJob(job){
+    const key=this.organization(job.companyIdentity),id=String(job.providerJobId||"");
+    if(!/^\d+$/.test(id))throw Object.assign(new Error("Identidade da vaga Gupy inválida."),{code:"GUPY_PUBLIC_JOB_IDENTITY_INVALID"});
+    const expected=`https://${key}.gupy.io/jobs/${id}`,{data,url}=await this.client.getText(expected,{maxBytes:1000000});
+    const final=new URL(url);
+    if(final.hostname!==`${key}.gupy.io`||final.pathname.replace(/\/$/,"")!==`/jobs/${id}`)throw Object.assign(new Error("A vaga Gupy redirecionou para outro destino."),{code:"GUPY_PUBLIC_JOB_REDIRECTED"});
+    let props;
+    try{props=JSON.parse(String(data).match(/<script[^>]+id=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/i)?.[1]||"{}").props?.pageProps;}catch{throw Object.assign(new Error("Detalhes públicos Gupy inválidos."),{code:"GUPY_PUBLIC_JOB_INVALID"});}
+    const detail=props?.job;
+    if(String(detail?.id)!==id||cleanOrganization(props?.subdomain)!==key)throw Object.assign(new Error("Os detalhes Gupy não correspondem à vaga."),{code:"GUPY_PUBLIC_JOB_IDENTITY_MISMATCH"});
+    return normalizeDiscoveryJob({...job,description:[detail.description,detail.responsibilities&&`Responsabilidades:\n${detail.responsibilities}`,detail.prerequisites&&`Requisitos:\n${detail.prerequisites}`,detail.relevantExperiences&&`Diferenciais:\n${detail.relevantExperiences}`].filter(Boolean).join("\n"),postedAt:detail.publishedAt||job.postedAt,expiresAt:detail.expiresAt||job.expiresAt});
+  }
   async resolveCanonicalIdentity(job){return {provider:this.id,organizationKey:job.companyIdentity,providerJobId:job.providerJobId};}
 }

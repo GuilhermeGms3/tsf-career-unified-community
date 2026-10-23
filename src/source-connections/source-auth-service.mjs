@@ -1,3 +1,4 @@
+import {publicUrl,installPublicBrowserGuard} from "../security/public-url-policy.mjs";
 import {randomUUID,randomBytes,createHash} from 'node:crypto';
 import {GUPY_ACCOUNT_SCOPE,gupyTenant,validateProviderState,authenticatedProviderPage} from './session-state.mjs';
 import {SESSION_PROVIDER_IDS,hostAllowed,sessionProviderById} from './session-provider-registry.mjs';
@@ -7,6 +8,14 @@ const hash=value=>createHash('sha256').update(String(value)).digest('hex');
 const sessionPending=new Set(['AUTH_REQUIRED','LAUNCH_PENDING','AUTH_IN_PROGRESS','USER_ACTION_REQUIRED','SESSION_VALIDATING']);
 const managedProviders=new Set(SESSION_PROVIDER_IDS);
 const runnerFailures=new Set(['PROTOCOL_HANDLER_FAILED','RUNNER_START_FAILED','NODE_NOT_FOUND','CHROMIUM_NOT_FOUND','CLAIM_FAILED','BROWSER_START_FAILED','BROWSER_NAVIGATION_FAILED','BROWSER_CLOSED','RUNNER_LOST','SESSION_VALIDATION_FAILED']);
+export const privateNetworkDestination=value=>{try{publicUrl(value);return false;}catch{return true;}};
+export const effectiveSessionExpiry = (state, sessionHours, clock = Date.now) => {
+  const localLimit = clock() + Number(sessionHours || 0) * 3600000;
+  const cookieLimits = (state?.cookies || [])
+    .map((cookie) => Number(cookie.expires) * 1000)
+    .filter((expiresAt) => Number.isFinite(expiresAt) && expiresAt > clock());
+  return new Date(Math.min(localLimit, ...cookieLimits)).toISOString();
+};
 export class SourceAuthService {
   constructor({store,vault,connections,githubEvidence,githubClientId=process.env.GITHUB_OAUTH_CLIENT_ID||'',fetchImpl=fetch,verifySession=null,clock=Date.now,launchTimeoutMs=20000,runnerLeaseMs=30000}){
     Object.assign(this,{clock,launchTimeoutMs,runnerLeaseMs});
@@ -19,7 +28,7 @@ export class SourceAuthService {
     if(!managedProviders.has(provider))return {status:'NOT_MANAGED'};
     const policy=sessionProviderById(provider),scope=provider==='gupy'?GUPY_ACCOUNT_SCOPE:policy.accountScope;
     const rows=this.db.prepare('SELECT tenant,status,verified_at,expires_at FROM provider_sessions WHERE provider=?').all(provider);
-    const sessions=rows.map(r=>({tenant:r.tenant,status:r.status==='SESSION_ACTIVE'&&Date.parse(r.expires_at)<=Date.now()?'SESSION_EXPIRED':r.status,verifiedAt:r.verified_at,expiresAt:r.expires_at}));
+    const sessions=rows.map(r=>({tenant:r.tenant,status:r.status==='SESSION_ACTIVE'&&Date.parse(r.expires_at)<=this.clock()?'SESSION_EXPIRED':r.status,verifiedAt:r.verified_at,expiresAt:r.expires_at}));
     const latest=this.latestSessionRequest(provider),account=sessions.find(s=>s.tenant===scope),selected=sessions.find(s=>s.tenant===tenant),active=account?.status==='SESSION_ACTIVE'?account:selected?.status==='SESSION_ACTIVE'?selected:null;
     return {status:latest&&sessionPending.has(latest.status)?latest.status:active?'SESSION_ACTIVE':account?.status||selected?.status||sessions[0]?.status||latest?.status||'AUTH_REQUIRED',scope:active?.tenant===scope?'ACCOUNT':'PER_HOST',sessions,request:latest?this.publicRequest(latest):null};
   }
@@ -144,13 +153,15 @@ export class SourceAuthService {
       this.authorize(id,ticket,'SESSION_VALIDATING');const ref=`session-${randomUUID()}`,previous=this.db.prepare('SELECT credential_ref FROM provider_sessions WHERE provider=? AND tenant=?').get(r.provider,policy.accountScope);
       await this.vault.put(ref,JSON.stringify(safe));
       try{this.authorize(id,ticket,'SESSION_VALIDATING');}catch(error){await this.vault.remove(ref);throw error;}
-      this.db.prepare("INSERT INTO provider_sessions VALUES(?,?,'SESSION_ACTIVE',?,?,?) ON CONFLICT(provider,tenant) DO UPDATE SET status=excluded.status,credential_ref=excluded.credential_ref,verified_at=excluded.verified_at,expires_at=excluded.expires_at").run(r.provider,policy.accountScope,ref,now(),new Date(Date.now()+policy.sessionHours*3600000).toISOString());
-      if(previous?.credential_ref)await this.vault.remove(previous.credential_ref);
-      this.update(id,'SESSION_ACTIVE');this.db.prepare('UPDATE source_auth_requests SET ticket_hash=NULL WHERE id=?').run(id);this.event(r.provider,'SESSION_ACTIVE',r);this.logs.resolve(r.provider,['SESSION_EXPIRED','AUTH_REQUIRED']);
-      await this.onAuthenticated?.(r.provider,r.tenant);return {status:'SESSION_ACTIVE',scope:'ACCOUNT',provider:r.provider};
+      const verifiedAt=new Date(this.clock()).toISOString(),expiresAt=effectiveSessionExpiry(safe,policy.sessionHours,this.clock);
+      try{this.store.database.transaction(()=>{this.db.prepare("INSERT INTO provider_sessions VALUES(?,?,'SESSION_ACTIVE',?,?,?) ON CONFLICT(provider,tenant) DO UPDATE SET status=excluded.status,credential_ref=excluded.credential_ref,verified_at=excluded.verified_at,expires_at=excluded.expires_at").run(r.provider,policy.accountScope,ref,verifiedAt,expiresAt);this.update(id,'SESSION_ACTIVE');this.db.prepare('UPDATE source_auth_requests SET ticket_hash=NULL WHERE id=?').run(id);});}
+      catch(error){await this.vault.remove(ref).catch(()=>undefined);throw error;}
+      if(previous?.credential_ref&&previous.credential_ref!==ref)await this.vault.remove(previous.credential_ref).catch(error=>this.event(r.provider,'SESSION_ORPHAN_CLEANUP_FAILED',r,{level:'WARN',errorCode:error.code||'SESSION_ORPHAN_CLEANUP_FAILED'}));
+      this.event(r.provider,'SESSION_ACTIVE',r);this.logs.resolve(r.provider,['SESSION_EXPIRED','AUTH_REQUIRED','SESSION_VAULT_REFERENCE_MISSING','SESSION_VAULT_REFERENCE_INVALID']);
+      await this.onAuthenticated?.(r.provider,r.tenant);return {status:'SESSION_ACTIVE',scope:'ACCOUNT',provider:r.provider,verifiedAt,expiresAt};
     }catch(error){const current=this.request(id);if(current.status==='SESSION_VALIDATING'){this.update(id,'AUTH_FAILED',{...current.payload,failureCode:'SESSION_VALIDATION_FAILED'});this.db.prepare('UPDATE source_auth_requests SET ticket_hash=NULL WHERE id=?').run(id);this.event(r.provider,'AUTH_FAILED',r,{level:'WARN',errorCode:'SESSION_VALIDATION_FAILED'});}throw error;}finally{this.busy.delete(id);}
   }
-  storageState(provider,tenant){const policy=sessionProviderById(provider);if(!policy)return undefined;const r=this.db.prepare('SELECT * FROM provider_sessions WHERE provider=? AND tenant=? LIMIT 1').get(provider,policy.accountScope);if(!r||r.status!=='SESSION_ACTIVE')return undefined;if(Date.parse(r.expires_at)<=Date.now()){this.expire(provider,r.tenant);return undefined;}return validateProviderState(JSON.parse(this.vault.get(r.credential_ref)),provider);}
+  storageState(provider,tenant){const policy=sessionProviderById(provider);if(!policy)return undefined;const r=this.db.prepare('SELECT * FROM provider_sessions WHERE provider=? AND tenant=? LIMIT 1').get(provider,policy.accountScope);if(!r||r.status!=='SESSION_ACTIVE')return undefined;if(Date.parse(r.expires_at)<=this.clock()){this.expire(provider,r.tenant);return undefined;}try{const protectedState=this.vault.get(r.credential_ref);if(!protectedState)throw Object.assign(new Error('SESSION_VAULT_REFERENCE_MISSING'),{code:'SESSION_VAULT_REFERENCE_MISSING'});return validateProviderState(JSON.parse(protectedState),provider);}catch(error){const code=error.code==='SESSION_VAULT_REFERENCE_MISSING'?'SESSION_VAULT_REFERENCE_MISSING':'SESSION_VAULT_REFERENCE_INVALID';this.db.prepare("UPDATE provider_sessions SET status='SESSION_EXPIRED' WHERE provider=? AND tenant=?").run(provider,r.tenant);this.event(provider,code,{}, {level:'ERROR',errorCode:code});return undefined;}}
   expire(provider,tenant){const policy=sessionProviderById(provider),scope=policy?.accountScope||tenant;const changed=this.db.prepare("UPDATE provider_sessions SET status='SESSION_EXPIRED' WHERE provider=? AND tenant=? AND status='SESSION_ACTIVE'").run(provider,scope).changes;this.event(provider,changed?'SESSION_EXPIRED':'AUTH_REQUIRED',{}, {level:'WARN',errorCode:changed?'SESSION_EXPIRED':'AUTH_REQUIRED'});}
   async check(provider){
     if(provider==='github'){if(this.status(provider).status!=='CONNECTED')return this.status(provider);await this.connections.validateCredential('github',this.connections.secret('github')||process.env.GITHUB_TOKEN);return this.status(provider);}
@@ -169,5 +180,5 @@ export class SourceAuthService {
     if(provider==='github'){await this.connections.remove(provider);this.store.database.setMetadata('github_disconnected','true');}
     this.event(provider,'DISCONNECTED');await this.onDisconnected?.(provider);return {status:'AUTH_REQUIRED'};
   }
-  async verifyInBrowser(state,tenant,providerId='gupy'){const policy=sessionProviderById(providerId);if(!policy)return false;const {chromium}=await import('playwright');const browser=await chromium.launch({headless:true});try{const context=await browser.newContext({storageState:state});const page=await context.newPage();await context.route('**/*',route=>{const request=route.request(),url=new URL(request.url());if(request.isNavigationRequest()&&request.frame()===page.mainFrame()&&(url.protocol!=='https:'||!hostAllowed(policy,url.hostname)))return route.abort();return route.continue();});const verificationUrl=providerId==='gupy'?'https://portal.gupy.io/my/applications':policy.loginUrl;await page.goto(verificationUrl,{waitUntil:'domcontentloaded',timeout:15000});return await authenticatedProviderPage(page,providerId);}finally{await browser.close();}}
+  async verifyInBrowser(state,tenant,providerId='gupy'){const policy=sessionProviderById(providerId);if(!policy)return false;const {chromium}=await import('playwright');const browser=await chromium.launch({headless:true});try{const context=await browser.newContext({storageState:state,serviceWorkers:"block"});const guard=await installPublicBrowserGuard(context,{navigationAllowed:url=>url.protocol==="https:"&&hostAllowed(policy,url.hostname)});const page=await context.newPage();await guard.protect(page);const verificationUrl=providerId==='gupy'?'https://portal.gupy.io/my/applications':policy.loginUrl;await page.goto(verificationUrl,{waitUntil:'domcontentloaded',timeout:15000});return await authenticatedProviderPage(page,providerId);}finally{await browser.close();}}
 }

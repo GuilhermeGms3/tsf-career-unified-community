@@ -42,6 +42,29 @@ async function fixture() {
   };
 }
 
+test("vaga encerrada não envia PDF antigo ao WhatsApp nem dispara política automática", async () => {
+  const f = await fixture();
+  try {
+    const ready = await addReadyVersion(f, "closed", "nerdin", 99);
+    const job = f.store.jobs.findById(ready.jobId);
+    f.store.jobs.upsert({ ...job, lifecycleStatus: "CLOSED" });
+    assert.equal((await f.dispatcher.dispatch(ready)).reason, "JOB_CLOSED");
+    assert.equal(f.calls.length, 0);
+  } finally { await f.close(); }
+});
+
+test("reviewOnly cria candidatura para Caixa sem WhatsApp nem envio por nota alta",async()=>{
+  const f=await fixture();
+  try{
+    const ready=await addReadyVersion(f,'manual','nerdin',99);
+    f.dispatcher.policyProvider=()=>({enabled:true,minimumAtsScore:80,whatsappMinimumAtsScore:60,whatsappMaximumAtsScore:79});
+    f.dispatcher.autoApplyHandler=()=>{throw Error('must not start automatic apply');};
+    const result=await f.dispatcher.dispatch({...ready,reviewOnly:true,allowWhatsApp:false});
+    assert.equal(result.status,'QUEUED_FOR_REVIEW');assert.equal(result.application.status,'PLANNED');assert.equal(f.calls.length,0);
+    assert.equal(f.store.autoApplyRuns.pending(10).length,0);
+  }finally{await f.close();}
+});
+
 async function addReadyVersion(f, id, origin, atsScore = 0, quality = null) {
   const timestamp = new Date().toISOString();
   const jobId = `job-${id}`, resumeId = "resume-base", versionId = `version-${id}`;
@@ -49,7 +72,7 @@ async function addReadyVersion(f, id, origin, atsScore = 0, quality = null) {
     id: jobId,
     title: `Analista ${id}`,
     company: "Acme",
-    description: "Linux Docker suporte infraestrutura",
+    description: "Atendimento de suporte técnico aos colaboradores, administração de sistemas Linux e Windows, diagnóstico de incidentes de infraestrutura e manutenção de containers Docker em ambiente corporativo.",
     location: "Brasil",
     source: origin,
     url: `https://careers.example.test/${id}`,
@@ -218,6 +241,22 @@ test("nota ATS acima da política pula WhatsApp e inicia AutoApply para qualquer
   }
 });
 
+test("nota ATS alta com descrição vazia não pula para AutoApply", async () => {
+  const f = await fixture();
+  try {
+    f.store.autoApplyPolicy.save({ enabled: true, minimumAtsScore: 80 });
+    f.dispatcher.policyProvider = () => f.store.autoApplyPolicy.get();
+    f.dispatcher.autoApplyHandler = () => { throw new Error("não deveria iniciar"); };
+    const input = await addReadyVersion(f, "no-description", "MANUAL_SEARCH", 96, { status: "PASS", autoApplyEligible: true });
+    const job = f.store.jobs.findById("job-no-description");
+    f.store.jobs.upsert({ ...job, description: "" });
+    const result = await f.dispatcher.dispatch(input);
+    assert.equal(result.status, "QUEUED_FOR_REVIEW");
+    assert.equal(result.reason, "JOB_DESCRIPTION_INSUFFICIENT");
+    assert.equal(f.calls.length, 0);
+  } finally { await f.close(); }
+});
+
 test("nota ATS alta sem revisão editorial não dispensa aprovação", async () => {
   const f = await fixture();
   try {
@@ -310,6 +349,21 @@ test("nota ATS alta não pula WhatsApp quando o gate editorial exige revisão", 
   } finally {
     await f.close();
   }
+});
+
+test("nota abaixo de 60 fica na plataforma mesmo sem gate editorial aprovado",async()=>{
+  const f=await fixture();
+  try{
+    f.store.autoApplyPolicy.save({enabled:true});
+    f.dispatcher.policyProvider=()=>f.store.autoApplyPolicy.get();
+    const low=await addReadyVersion(f,"low-without-quality","MANUAL_SEARCH",50);
+    assert.equal((await f.dispatcher.dispatch(low)).status,"QUEUED_FOR_REVIEW");
+    assert.equal(f.calls.length,0);
+    const middle=await addReadyVersion(f,"defer-whatsapp","MASS_HUNT_AUTOAPPLY",75);
+    assert.equal((await f.dispatcher.dispatch({...middle,allowWhatsApp:false})).status,"WHATSAPP_DEFERRED");
+    assert.equal(f.calls.length,0);
+    assert.equal((await f.dispatcher.dispatch(middle)).status,"AWAITING_APPROVAL");
+  }finally{await f.close();}
 });
 
 test("versão genérica ou ainda não pronta não abre candidatura", async () => {
