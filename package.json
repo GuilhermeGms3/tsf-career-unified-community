@@ -34,6 +34,8 @@
     "evidence:github:validate": "node --test --test-concurrency=1 tests/evidence-intelligence-github.test.mjs tests/matching.test.mjs tests/candidate-knowledge-v3.test.mjs",
     "provider-routing:validate": "node --test --test-concurrency=1 tests/provider-routing-v4-1.test.mjs",
     "matcher-semantics:validate": "node --test --test-concurrency=1 tests/matcher-semantics-v4-1.test.mjs tests/analysis-without-resume-v4-1.test.mjs",
+    "autosubmit:validate": "node --test --test-concurrency=1 tests/submit-homologation-local.test.mjs tests/last-mile-profiles.test.mjs tests/portal-flow-capture.test.mjs tests/application-batch-gupy.test.mjs",
+    "capture:portal": "node scripts/capture-portal-flow.mjs",
     "cross-source:validate": "node --test --test-concurrency=1 tests/cross-source-reconciliation-v4-1.test.mjs",
     "funnel:validate": "node --test --test-concurrency=1 tests/mass-hunt-funnel-v4-1.test.mjs",
     "search-composer:validate": "node --test --test-concurrency=1 tests/search-composer-v4-1.test.mjs",
