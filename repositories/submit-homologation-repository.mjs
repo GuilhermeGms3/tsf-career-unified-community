@@ -1,0 +1,13 @@
+import { randomUUID } from "node:crypto";
+
+export class SubmitHomologationRepository{
+  constructor(connection){this.connection=connection;}
+  create(item){const id=item.id||`submit-homologation-${randomUUID()}`;this.connection.prepare(`INSERT INTO submit_homologations(id,provider,adapter_version,form_engine_version,scenario,status,result,external_confirmation,application_id,submission_receipt_id,receipt_hash,observed_at,valid_until,approved_at) VALUES(?,?,?,?,?,'APPROVED','EXTERNALLY_CONFIRMED',?,?,?,?,?,?,?)`).run(id,item.provider,item.adapterVersion,item.formEngineVersion,item.scenario,item.externalConfirmation,item.applicationId||null,item.submissionReceiptId,item.receiptHash,item.observedAt,item.validUntil,item.approvedAt);return this.findById(id);}
+  findById(id){const r=this.connection.prepare("SELECT * FROM submit_homologations WHERE id=?").get(id);return r?this.map(r):null;}
+  forReceipt(receiptId){const r=this.connection.prepare("SELECT * FROM submit_homologations WHERE submission_receipt_id=?").get(receiptId);return r?this.map(r):null;}
+  list({provider=""}={}){return (provider?this.connection.prepare("SELECT * FROM submit_homologations WHERE provider=? ORDER BY approved_at DESC,rowid DESC").all(provider):this.connection.prepare("SELECT * FROM submit_homologations ORDER BY approved_at DESC,rowid DESC").all()).map(r=>this.map(r));}
+  revoke(id,{reason="",at=new Date().toISOString()}={}){this.connection.prepare("UPDATE submit_homologations SET status='REVOKED',revoked_at=?,revoke_reason=? WHERE id=? AND status='APPROVED'").run(at,String(reason).slice(0,300),id);return this.findById(id);}
+  // Formato lido por submitHomologation(): a regra de vigencia continua la, nao aqui.
+  evidenceRecords(provider){return this.list({provider}).map(item=>({provider:item.provider,adapterVersion:item.adapterVersion,formEngineVersion:item.formEngineVersion,scenario:item.scenario,status:item.status,result:item.result,receiptReference:item.submissionReceiptId,evidenceReference:`${item.externalConfirmation}:${item.receiptHash}`,observedAt:item.observedAt,validUntil:item.validUntil,source:"LOCAL_INSTALLATION",homologationId:item.id}));}
+  map(r){return {id:r.id,provider:r.provider,adapterVersion:r.adapter_version,formEngineVersion:r.form_engine_version,scenario:r.scenario,status:r.status,result:r.result,externalConfirmation:r.external_confirmation,applicationId:r.application_id||"",submissionReceiptId:r.submission_receipt_id,receiptHash:r.receipt_hash,observedAt:r.observed_at,validUntil:r.valid_until,approvedAt:r.approved_at,revokedAt:r.revoked_at||"",revokeReason:r.revoke_reason||""};}
+}

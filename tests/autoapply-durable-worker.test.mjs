@@ -52,7 +52,7 @@ test("upgrade preserves duplicate legacy RUNNING requests without failing the ne
     db.close();db=await new HubDatabase(file).initialize();
     assert.equal(db.connection.prepare("SELECT COUNT(*) n FROM auto_apply_runs WHERE status='RETRYABLE'").get().n,2);
     assert.equal(db.connection.prepare("SELECT COUNT(*) n FROM applications").get().n,1);
-    assert.equal(db.connection.prepare("SELECT COUNT(*) n FROM schema_migrations").get().n,58);
+    assert.equal(db.connection.prepare("SELECT COUNT(*) n FROM schema_migrations").get().n,59);
     assert.deepEqual(db.connection.prepare("PRAGMA foreign_key_check").all(),[]);
   }finally{db?.close();await rm(dir,{recursive:true,force:true});}
 });

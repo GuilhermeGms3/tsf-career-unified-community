@@ -1,8 +1,14 @@
 import { HostedAtsAdapter } from "../hosted/hosted-ats-adapter.mjs";
+import { portalSubmitProfile } from "../last-mile/portal-submit-profiles.mjs";
+import { submitWithProfile } from "../last-mile/last-mile-engine.mjs";
 
 class AssistedAtsAdapter extends HostedAtsAdapter {
   constructor(type, version) {
     super(type, version);
+    this.submitProfile = portalSubmitProfile(type);
+    // Adapter assistido nao tem submit. Portal com Cofre ganha a ultima milha por perfil so quando o
+    // perfil estiver COMPLETE; ainda assim o registry precisa promove-lo a Controlled Submit.
+    if (this.submitProfile?.status === "COMPLETE") this.submit = (page, options = {}) => submitWithProfile(page, this.submitProfile, options);
   }
 }
 

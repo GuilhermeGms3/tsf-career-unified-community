@@ -85,7 +85,7 @@ test("schema atual preserva document engine e archetypes", async () => {
       f.store.database.connection
         .prepare("SELECT MAX(version) version FROM schema_migrations")
         .get().version,
-      58,
+      59,
     );
     for (const table of [
       "resume_versions",

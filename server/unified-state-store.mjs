@@ -111,6 +111,7 @@ import {
   SubmissionPreflightRepository,
   SubmissionReceiptRepository,
 } from "../repositories/submission-repository.mjs";
+import { SubmitHomologationRepository } from "../repositories/submit-homologation-repository.mjs";
 import { capabilityCatalog } from "../src/discovery/source-capability-catalog.mjs";
 import { ResumeArtifactService } from "../src/resume/resume-artifact-service.mjs";
 import { CandidateKnowledgeMigrator } from "../src/candidate-knowledge/candidate-knowledge-migrator.mjs";
@@ -248,6 +249,7 @@ export class UnifiedStateStore {
       this.database,
     );
     this.submissionReceipts = new SubmissionReceiptRepository(connection);
+    this.submitHomologations = new SubmitHomologationRepository(connection);
     this.autoApplyRuns = new AutoApplyRunRepository(connection, this.database);
     this.intelligenceSettings = new IntelligenceSettingsRepository(connection);
     this.intelligenceRuns = new IntelligenceRunRepository(connection);

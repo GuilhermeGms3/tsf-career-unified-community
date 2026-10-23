@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { AutoApplyOrchestrator } from "../src/automation/auto-apply-orchestrator.mjs";
 import {AdapterRegistry} from "../src/automation/ats/adapter-registry.mjs";
+import {GupyApplicationAdapter} from "../src/automation/ats/gupy/gupy-application-adapter.mjs";
+import {FORM_ENGINE_VERSION} from "../src/automation/ats/submit-homologation.mjs";
 
 function authorizeScore(f, { status = "APPROVED", version = f.application.resumeVersionId } = {}) {
   const approval = { id: "human-approved", applicationId: f.application.id, resumeVersionId: version, status };
@@ -393,4 +395,39 @@ test("pergunta obrigatória pausa o submit e aciona fallback WhatsApp", async ()
   assert.equal(result.escalation.status, "AWAITING_ANSWER");
   assert.deepEqual(escalated, ["application-1"]);
   assert.deepEqual(f.calls, ["fill"]);
+});
+
+// Homologação local do Gupy: vale para a versão do adapter V2 e o cenário do rascunho pronto.
+function gupyThreshold({ homologatedScenario = "", stepsVisited = 1 } = {}) {
+  const f = fixture("gupy", { submissionEnabled: true, resumeQuality: { status: "PASS", autoApplyEligible: true } });
+  f.context.request.source = "ATS_THRESHOLD";
+  f.orchestrator.store.applicationBatches.findItem = () => ({ id: "draft-1", status: "READY_TO_SUBMIT", reason: "", adapterVersion: GupyApplicationAdapter.version, flow: { stepsVisited } });
+  const day = 86400000;
+  f.orchestrator.applicationEngine.registry.homologationRecords = provider => provider !== "gupy" || !homologatedScenario ? [] : [{
+    provider: "gupy", adapterVersion: GupyApplicationAdapter.version, formEngineVersion: FORM_ENGINE_VERSION, scenario: homologatedScenario,
+    status: "APPROVED", result: "EXTERNALLY_CONFIRMED", receiptReference: "receipt-1", evidenceReference: "PORTAL_APPLICATION_LIST:hash",
+    observedAt: new Date(Date.now() - day).toISOString(), validUntil: new Date(Date.now() + day).toISOString(),
+  }];
+  return f;
+}
+const gupySubmitted = f => f.calls.some(call => Array.isArray(call) && call[0] === "gupy-submit");
+
+test("política ATS mantém Gupy em revisão sem homologação local", async () => {
+  const f = gupyThreshold();
+  const result = await run(f);
+  assert.deepEqual([result.status, result.reason], ["READY_TO_SUBMIT_MANUAL", "PORTAL_EXTERNAL_SUBMIT_NOT_VERIFIED"]);
+  assert.equal(gupySubmitted(f), false);
+});
+
+test("política ATS envia Gupy quando o cenário do rascunho tem homologação local vigente", async () => {
+  const f = gupyThreshold({ homologatedScenario: "application-form" });
+  const result = await run(f);
+  assert.equal(result.status, "SUBMITTED");
+  assert.equal(gupySubmitted(f), true);
+});
+
+test("homologação Gupy de formulário simples não vale para formulário em etapas", async () => {
+  const f = gupyThreshold({ homologatedScenario: "application-form", stepsVisited: 3 });
+  assert.equal((await run(f)).reason, "PORTAL_EXTERNAL_SUBMIT_NOT_VERIFIED");
+  assert.equal(gupySubmitted(f), false);
 });

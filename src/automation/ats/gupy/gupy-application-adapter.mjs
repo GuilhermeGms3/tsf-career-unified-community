@@ -3,23 +3,22 @@ import {parseGupyPage} from "./gupy-page-parser.mjs";
 import {parseGupyIdentity} from "./gupy-identity.mjs";
 import {fingerprint,normalizeApplicationField,schemaSignature,isResolved} from "../../../application/application-field-schema.mjs";
 import {detectChallenge} from "../../application-engine.mjs";
+import {PORTAL_SUBMIT_PROFILES} from "../last-mile/portal-submit-profiles.mjs";
+import {advanceStep,findFinalBoundary,findProgression,profileHostAllowed,restrictToProfileHosts,submitWithProfile} from "../last-mile/last-mile-engine.mjs";
 
+// Ultima milha (hosts, avanco, botao final e confirmacao) vem do perfil Gupy do motor compartilhado.
 export class GupyApplicationAdapter extends GupyAdapter {
   static version="gupy-application-v3";
   static provider="GUPY";
+  // Cenario da homologacao de envio, a partir do rascunho do Application Batch pronto para envio.
+  static scenarioOf(draft){return Number(draft?.flow?.stepsVisited||1)>1?"multi-step":"application-form";}
+  submitProfile=PORTAL_SUBMIT_PROFILES.gupy;
   identify(value){return parseGupyIdentity(value);}
-  async configureSession(session,draft){
-    await session.context.route("**/*",async route=>{
-      const request=route.request(),url=new URL(request.url());
-      if(url.protocol!=="https:"||url.port||url.username||url.password||!(url.hostname==="gupy.io"||url.hostname.endsWith(".gupy.io")))return route.abort();
-      if(draft.mode==="DRY_RUN"&&!["GET","HEAD"].includes(request.method()))return route.abort();
-      return route.continue();
-    });
-  }
+  async configureSession(session,draft){await restrictToProfileHosts(session.context,this.submitProfile,{mode:draft.mode});}
   validatePageTarget(page,draft){
-    const identity=this.identify(page.url()),host=new URL(page.url()).hostname;
+    const identity=this.identify(page.url());
     if(identity.canonicalUrl===draft.canonicalIdentity)return;
-    if(!identity.canonicalUrl&&(host==="gupy.io"||host.endsWith(".gupy.io")))return;
+    if(!identity.canonicalUrl&&profileHostAllowed(this.submitProfile,page.url()))return;
     throw Object.assign(Error("GUPY_IDENTITY_MISMATCH"),{code:"GUPY_IDENTITY_MISMATCH"});
   }
   async parsePage(page){return parseGupyPage(page);}
@@ -49,39 +48,8 @@ export class GupyApplicationAdapter extends GupyAdapter {
     }
     result.valid=result.valid&&!result.invalid.length;return result;
   }
-  async findBoundary(page){
-    const matches=page.getByRole("button",{name:/^(?:enviar candidatura|finalizar candidatura|concluir inscrição|submit application)$/i});
-    if(await matches.count()!==1||!await matches.isVisible())throw Object.assign(Error("Boundary final Gupy ausente ou ambígua."),{code:"GUPY_BOUNDARY_UNSAFE"});return matches;
-  }
-  async findProgression(page){
-    const candidates=page.getByRole("button",{name:/^(?:pr[oó]xima etapa|pr[oó]ximo|continuar|avançar|next|continue)$/i});
-    const available=[];
-    for(let index=0;index<await candidates.count();index++){
-      const candidate=candidates.nth(index);
-      if(await candidate.isVisible()&&await candidate.isEnabled())available.push(candidate);
-    }
-    if(available.length!==1)throw Object.assign(Error("Avanço Gupy ausente ou ambíguo."),{code:available.length?"GUPY_STEP_BOUNDARY_AMBIGUOUS":"GUPY_STEP_BOUNDARY_MISSING"});
-    return available[0];
-  }
-  async advance(page,{previousSignature="",timeoutMs=3000}={}){
-    const progression=await this.findProgression(page);
-    await progression.click();
-    if(!previousSignature)return;
-    const deadline=Date.now()+timeoutMs;
-    while(Date.now()<deadline){
-      await page.waitForTimeout(100);
-      const current=await this.inspect(page).catch(()=>null);
-      if(current&&(current.challenge||current.signature!==previousSignature))return;
-    }
-    throw Object.assign(Error("A etapa Gupy não mudou após o avanço."),{code:"GUPY_STEP_NOT_ADVANCED"});
-  }
-  async controlledSubmit(page,{onActionTriggered,confirmationTimeoutMs=5000}){
-    const boundary=await this.findBoundary(page),success=page.getByText(/^(?:Candidatura enviada!|Sua candidatura foi enviada com sucesso\.?|Application submitted successfully\.?)$/i);
-    if(await success.count())throw Object.assign(Error("Confirmação já existia antes do envio."),{code:"BLOCKED_DUPLICATE"});
-    await onActionTriggered();
-    try{await boundary.click();await success.first().waitFor({state:"visible",timeout:confirmationTimeoutMs});}
-    catch{return {status:"UNCERTAIN",errorCode:"GUPY_CONFIRMATION_NOT_OBSERVED"};}
-    const url=new URL(page.url());url.search="";url.hash="";
-    return {status:"SUBMITTED",receipt:{confirmationUrl:url.href,confirmationText:"Candidatura enviada",metadata:{confirmationKind:"NEW_VISIBLE_SUCCESS_TEXT",providerStatus:"SUBMITTED"}}};
-  }
+  findBoundary(page){return findFinalBoundary(page,this.submitProfile);}
+  findProgression(page){return findProgression(page,this.submitProfile);}
+  advance(page,{previousSignature="",timeoutMs=3000}={}){return advanceStep(page,this.submitProfile,{inspect:current=>this.inspect(current),previousSignature,timeoutMs});}
+  controlledSubmit(page,{onActionTriggered,confirmationTimeoutMs=5000}){return submitWithProfile(page,this.submitProfile,{onActionTriggered,confirmationTimeoutMs});}
 }

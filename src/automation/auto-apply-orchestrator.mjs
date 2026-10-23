@@ -4,6 +4,8 @@ import { classifyAutomationFailure } from "./automation-failure.mjs";
 import { setTimeout as delay } from "node:timers/promises";
 import { randomUUID } from "node:crypto";
 import { evaluateApplicationRoutingPolicy, resumeAtsScore, tailoringAllowsAutoApply } from "../application/application-routing-policy.mjs";
+import { SUBMIT_EVIDENCE, submitHomologation } from "./ats/submit-homologation.mjs";
+import { GupyApplicationAdapter } from "./ats/gupy/gupy-application-adapter.mjs";
 
 const terminal = new Set(["SUBMITTED", "SUBMISSION_UNCERTAIN", "CANCELLED"]);
 const automationSource = (request = {}) =>
@@ -280,6 +282,13 @@ export class AutoApplyOrchestrator {
     return registry.describe(provider,{scenario:inspection.detectedVariant}).homologation?.automaticSubmitEligible===true;
   }
 
+  // Gupy envia pelo Application Batch (adapter V2): a homologacao vale para a versao e o cenario do rascunho.
+  gupyAutomaticSubmitVerified(draft){
+    if(!draft?.adapterVersion||draft.adapterVersion!==GupyApplicationAdapter.version)return false;
+    const records=[...SUBMIT_EVIDENCE,...(this.applicationEngine.registry?.homologationRecords?.("gupy")||[])];
+    return submitHomologation("gupy",draft.adapterVersion,{scenario:GupyApplicationAdapter.scenarioOf(draft),records}).automaticSubmitEligible===true;
+  }
+
   async fillWithRecovery(applicationId) {
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
@@ -357,7 +366,10 @@ export class AutoApplyOrchestrator {
     }
     const latest = this.store.applications.findById(application.id);
     if (terminal.has(latest.status)) return { status: latest.status, provider: "gupy", applicationId: application.id, reused: true };
-    if(request.source==="ATS_THRESHOLD")return {status:"READY_TO_SUBMIT_MANUAL",provider:"gupy",applicationId:application.id,reason:"PORTAL_EXTERNAL_SUBMIT_NOT_VERIFIED"};
+    if(request.source==="ATS_THRESHOLD"&&!this.gupyAutomaticSubmitVerified(draft)){
+      this.store.applications.updateDetails({...latest,nextAction:"Revisar envio: o cenario Gupy atual nao possui homologacao vigente"});
+      return {status:"READY_TO_SUBMIT_MANUAL",provider:"gupy",applicationId:application.id,reason:"PORTAL_EXTERNAL_SUBMIT_NOT_VERIFIED"};
+    }
     const result = await this.applicationBatchService.submit(draft.id, {
       confirmed: true,
       idempotencyKey: `${source}:${request.id}:gupy`,

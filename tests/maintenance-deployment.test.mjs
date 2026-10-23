@@ -71,9 +71,9 @@ test("maintenance never creates missing DB, migrates old schema, imports changed
   store=await new UnifiedStateStore({dataDir:dir,startupEffects:false}).initialize();
   assert.equal(store.jobs.findById("must-not-import"),null);
   assert.equal(store.intelligenceJobs.findById("pending").status,"RUNNING");store.close();
-  const db=new DatabaseSync(path.join(dir,"career-hub.sqlite"));db.exec("DELETE FROM schema_migrations WHERE version=58");db.close();
+  const db=new DatabaseSync(path.join(dir,"career-hub.sqlite"));db.exec("DELETE FROM schema_migrations WHERE version=59");db.close();
   await assert.rejects(new UnifiedStateStore({dataDir:dir,startupEffects:false}).initialize(),{code:"DATABASE_MIGRATION_REQUIRED"});
-  const check=new DatabaseSync(path.join(dir,"career-hub.sqlite"),{readOnly:true});assert.equal(check.prepare("SELECT max(version) v FROM schema_migrations").get().v,57);check.close();
+  const check=new DatabaseSync(path.join(dir,"career-hub.sqlite"),{readOnly:true});assert.equal(check.prepare("SELECT max(version) v FROM schema_migrations").get().v,58);check.close();
 });
 
 test("path rebasing is explicit, copy-only, validates files and preserves original DB",async t=>{

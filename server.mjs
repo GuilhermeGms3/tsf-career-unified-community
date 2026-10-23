@@ -28,6 +28,7 @@ import { assertAutomationMode } from "./src/application/types.mjs";
 import {SubmissionPreflight} from "./src/application/submission-preflight.mjs";
 import {SubmissionConsentService} from "./src/application/submission-consent-service.mjs";
 import {ControlledSubmissionService} from "./src/application/controlled-submission-service.mjs";
+import {SubmitHomologationService} from "./src/application/submit-homologation-service.mjs";
 import {AdapterSubmissionTransport} from "./src/application/submission-transport.mjs";
 import {GreenhouseFinalRevalidator} from "./src/application/greenhouse-final-revalidator.mjs";
 import {LeverFinalRevalidator} from "./src/application/lever-final-revalidator.mjs";
@@ -110,7 +111,7 @@ import {CommunityDiscoveryService} from "./src/discovery/community/community-dis
 import {LeadPromotionService} from "./src/discovery/v4/lead-promotion-service.mjs";
 import {RuntimeCapabilityService} from "./src/discovery/v4/runtime-capability-service.mjs";
 import {completeLegacySchedule,failLegacySchedule,legacyScheduleLogContext,LEGACY_SCHEDULE_STATUS,runDueLegacySchedules} from "./src/scheduler/legacy-search-scheduler-policy.mjs";
-import {createApplicationV2Routes,createAtsRoutes,createAutopilotRoutes,createCandidateKnowledgeRoutes,createCoverageBenchmarkRoutes,createDiscoveryV3Routes,createDiscoveryV4Routes,createExperienceRoutes,createOpportunityRoutes,createQualityLabRoutes,createResumeBatchRoutes,createSourceRoutes,createTodayRoutes,createWhatsappRoutes} from "./server/routes/index.mjs";
+import {createApplicationV2Routes,createAtsRoutes,createAutopilotRoutes,createCandidateKnowledgeRoutes,createCoverageBenchmarkRoutes,createDiscoveryV3Routes,createDiscoveryV4Routes,createExperienceRoutes,createOpportunityRoutes,createQualityLabRoutes,createResumeBatchRoutes,createSourceRoutes,createSubmitHomologationRoutes,createTodayRoutes,createWhatsappRoutes} from "./server/routes/index.mjs";
 import { createMobileGateway } from "./server/mobile/mobile-gateway.mjs";
 import { mobileGatewayConfig } from "./server/mobile/mobile-auth.mjs";
 import { runtimeOperationPolicy } from "./server/runtime-operation-policy.mjs";
@@ -224,6 +225,9 @@ const applicationEngine = new ApplicationEngine({
   headless: automationHeadless,
   questionClassifier
 });
+// Envio automatico por portal so com homologacao vigente registrada nesta instalacao.
+applicationEngine.registry.homologationRecords=provider=>unifiedStore.submitHomologations.evidenceRecords(provider);
+const submitHomologationService=new SubmitHomologationService({store:unifiedStore,registry:applicationEngine.registry});
 const submissionEnabled=submissionRuntimeEnabled();
 const submissionBrowserManager=applicationEngine.browser;
 const greenhouseFinalRevalidator=new GreenhouseFinalRevalidator({store:unifiedStore,dataDir:hubDataDir,registry:applicationEngine.registry,browserManager:submissionBrowserManager});
@@ -2486,6 +2490,7 @@ const extractedRouteHandlers=[
   createApplicationV2Routes({store:unifiedStore,submissionPreflight,consentService:submissionConsentService,controlledSubmission:controlledSubmissionService,reconciliation:submissionReconciliationService,sessionProvider:applicationId=>submissionBrowserManager.status(applicationId),readJson:readRequestJson,json,sendError}),
   createTodayRoutes({store:unifiedStore,decisionInbox,dailyRefreshService,readJson:readRequestJson,json,sendError}),
   createAtsRoutes({recalculationService:atsRecalculationService,readJson:readRequestJson,json,sendError}),
+  createSubmitHomologationRoutes({service:submitHomologationService,readJson:readRequestJson,json,sendError}),
   createQualityLabRoutes({service:qualityLabelService,readJson:readRequestJson,json,sendError}),
   createCoverageBenchmarkRoutes({service:coverageBenchmarkService,readJson:readRequestJson,json,sendError}),
   createOpportunityRoutes({store:unifiedStore,opportunityService,availabilityService:opportunityAvailabilityService,dailyRefreshService,availabilityScheduler,decisionInbox,readJson:readRequestJson,json,sendError}),

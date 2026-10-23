@@ -10,7 +10,8 @@ import { WorkdayAdapter } from "./workday/workday-adapter.mjs";
 import {GupyAdapter} from "./gupy/gupy-adapter.mjs";
 import {GUPY_CAPABILITY_TRUTH} from "../../application/gupy-capability-truth.mjs";
 import { assistedAtsAdapterTypes } from "./assisted/assisted-ats-adapters.mjs";
-import { submitHomologation } from "./submit-homologation.mjs";
+import { SUBMIT_EVIDENCE, submitHomologation } from "./submit-homologation.mjs";
+import { portalSubmitProfile } from "./last-mile/portal-submit-profiles.mjs";
 
 const assistedFillCapability=Object.freeze({level:"ASSISTED_FILL",implemented:true,canInspect:true,canFill:true,canValidate:true,canSubmit:false,canReceipt:false,authHandoff:true,challengeHandoff:true,label:"Inspeção e preenchimento genéricos; conclusão manual obrigatória"});
 
@@ -48,11 +49,13 @@ export const APPLICATION_ADAPTER_CAPABILITIES=Object.freeze({
 });
 
 export class AdapterRegistry {
+  // homologationRecords(provider): evidencias de envio real desta instalacao (store.submitHomologations).
+  constructor({homologationRecords=()=>[]}={}){this.homologationRecords=homologationRecords;}
   get(type){const normalized=String(type||"unknown").toLowerCase(),AssistedAdapter=assistedAtsAdapterTypes[normalized];return normalized==="greenhouse"?new GreenhouseAdapter():normalized==="lever"?new LeverAdapter():normalized==="ashby"?new AshbyAdapter():normalized==="smartrecruiters"?new SmartRecruitersAdapter():normalized==="workable"?new WorkableAdapter():normalized==="nerdin"?new NerdinAdapter():normalized==="teamtailor"?new TeamtailorAdapter():normalized==="workday"?new WorkdayAdapter():normalized==="gupy"?new GupyAdapter():AssistedAdapter?new AssistedAdapter():new GenericAdapter();}
   supports(type){return Object.hasOwn(APPLICATION_ADAPTER_CAPABILITIES,String(type||"unknown").toLowerCase());}
   version(type){return this.get(type).constructor.version;}
   // Historical receipt: docs/autoapply-external-homologation-2026-10-15.md.
   // This does not replace fresh form/session/receipt checks on each application.
-  describe(type,{scenario=""}={}){const normalized=String(type||"unknown").toLowerCase(),homologation=submitHomologation(normalized,this.version(normalized),{scenario});return {...structuredClone(APPLICATION_ADAPTER_CAPABILITIES[normalized]||APPLICATION_ADAPTER_CAPABILITIES.unknown),homologation,externalSubmitVerified:homologation.automaticSubmitEligible};}
+  describe(type,{scenario=""}={}){const normalized=String(type||"unknown").toLowerCase(),homologation=submitHomologation(normalized,this.version(normalized),{scenario,records:[...SUBMIT_EVIDENCE,...this.homologationRecords(normalized)]});const profile=portalSubmitProfile(normalized);return {...structuredClone(APPLICATION_ADAPTER_CAPABILITIES[normalized]||APPLICATION_ADAPTER_CAPABILITIES.unknown),homologation,externalSubmitVerified:homologation.automaticSubmitEligible,...(profile?{submitProfile:{status:profile.status,missing:[...profile.missing]}}:{})};}
   listCapabilities(){return Object.keys(APPLICATION_ADAPTER_CAPABILITIES).map(atsType=>({atsType,...this.describe(atsType)}));}
 }

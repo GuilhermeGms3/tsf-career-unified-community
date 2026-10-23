@@ -73,7 +73,7 @@ test("migrations criam schemas intelligence, discovery, documentos, automacao, c
       [
         1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
         21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38,
-        39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58,
+        39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59,
       ],
     );
     for (const table of [
@@ -116,6 +116,7 @@ test("migrations criam schemas intelligence, discovery, documentos, automacao, c
       "evidence_gaps",
       "knowledge_audit_events",
       "submission_preflight_evaluations",
+      "submit_homologations",
       "submission_consents",
       "submission_attempts",
       "submission_receipts",
@@ -407,7 +408,7 @@ test("review-before-fill aparece no preflight", async () => {
     await f.close();
   }
 });
-test("migrations 005 a 058 atualizam banco no schema 004", async () => {
+test("migrations 005 a 059 atualizam banco no schema 004", async () => {
   const dataDir = await mkdtemp(
       path.join(os.tmpdir(), "career-intelligence-v004-"),
     ),
@@ -434,7 +435,7 @@ test("migrations 005 a 058 atualizam banco no schema 004", async () => {
       upgraded.connection
         .prepare("SELECT MAX(version) version FROM schema_migrations")
         .get().version,
-      58,
+      59,
     );
     assert.ok(
       upgraded.connection

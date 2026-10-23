@@ -12,3 +12,4 @@ export {createAtsRoutes} from "./ats-routes.mjs";
 export {createQualityLabRoutes} from "./quality-lab-routes.mjs";
 export {createCoverageBenchmarkRoutes} from "./coverage-benchmark-routes.mjs";
 export {createResumeBatchRoutes} from "./resume-batch-routes.mjs";
+export {createSubmitHomologationRoutes} from "./submit-homologation-routes.mjs";

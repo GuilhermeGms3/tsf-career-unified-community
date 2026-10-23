@@ -46,7 +46,7 @@ test("applies migrations and imports legacy JSON idempotently", async () => {
     assert.equal(state.applications[0].status, "PLANNED");
     assert.equal(state.generations[0].id, "generation-legacy");
     assert.equal(store.database.connection.prepare("PRAGMA foreign_keys").get().foreign_keys, 1);
-    assert.equal(store.database.connection.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get().count, 58);
+    assert.equal(store.database.connection.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get().count, 59);
     assert.ok(store.database.connection.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='whatsapp_question_requests'").get());
     assert.ok(store.database.connection.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='whatsapp_question_receipts'").get());
     assert.equal(state.analyses[0].algorithmVersion, "ats-matcher-v1");
@@ -58,7 +58,7 @@ test("applies migrations and imports legacy JSON idempotently", async () => {
     try {
       assert.equal((await reopened.read()).applications.length, 1);
       assert.equal(reopened.applications.events("application-1").length, 1);
-      assert.equal(reopened.database.connection.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get().count, 58);
+      assert.equal(reopened.database.connection.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get().count, 59);
     } finally {
       reopened.close();
       store.database.connection = null;
@@ -179,7 +179,7 @@ test("upgrades a V1 database without destroying legacy ATS analyses", async () =
     const row = upgraded.connection.prepare("SELECT score, algorithm_version FROM ats_analyses WHERE id = ?").get("analysis-v1");
     assert.equal(row.score, 50);
     assert.equal(row.algorithm_version, "ats-matcher-v1");
-    assert.equal(upgraded.connection.prepare("SELECT COUNT(1) AS count FROM schema_migrations").get().count, 58);
+    assert.equal(upgraded.connection.prepare("SELECT COUNT(1) AS count FROM schema_migrations").get().count, 59);
     assert.ok(upgraded.connection.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'ats_analysis_items'").get());
   } finally {
     upgraded.close();
@@ -245,7 +245,7 @@ test("migration 004 atualiza banco no schema 003",async()=>{
   const migrationsDir=path.join(dataDir,"migrations");const databasePath=path.join(dataDir,"db.sqlite");await mkdir(migrationsDir);
   for(const name of ["001_initial.sql","002_ats_matcher_v2.sql","003_application_engine.sql"])await copyFile(path.resolve(import.meta.dirname,"..","db","migrations",name),path.join(migrationsDir,name));
   const old=await new HubDatabase(databasePath,{migrationsDir}).initialize();old.close();const upgraded=await new HubDatabase(databasePath).initialize();
-  try{assert.equal(upgraded.connection.prepare("SELECT COUNT(*) count FROM schema_migrations").get().count, 58);assert.ok(upgraded.connection.prepare("SELECT name FROM sqlite_master WHERE name='candidate_answers'").get());assert.ok(upgraded.connection.prepare("SELECT name FROM sqlite_master WHERE name='ats_analyses_job_updated_idx'").get());assert.ok(upgraded.connection.prepare("SELECT name FROM sqlite_master WHERE name='ats_analyses_projection_idx'").get());}
+  try{assert.equal(upgraded.connection.prepare("SELECT COUNT(*) count FROM schema_migrations").get().count, 59);assert.ok(upgraded.connection.prepare("SELECT name FROM sqlite_master WHERE name='candidate_answers'").get());assert.ok(upgraded.connection.prepare("SELECT name FROM sqlite_master WHERE name='ats_analyses_job_updated_idx'").get());assert.ok(upgraded.connection.prepare("SELECT name FROM sqlite_master WHERE name='ats_analyses_projection_idx'").get());}
   finally{upgraded.close();await rm(dataDir,{recursive:true,force:true});}
 });
 

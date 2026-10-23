@@ -11,7 +11,7 @@ test("ensaio usa backup SQLite, preserva origem e recusa sobrescrever snapshot",
   const directory=await mkdtemp(path.join(os.tmpdir(),"upgrade-rehearsal-")),source=path.join(directory,"source.sqlite"),output=path.join(directory,"rehearsal");
   const db=await new HubDatabase(source).initialize();db.close();const before=await readFile(source);
   try{
-    const result=await rehearseDataUpgrade(source,output);assert.equal(result.status,"PASS");assert.equal(result.schemaVersion,58);
+    const result=await rehearseDataUpgrade(source,output);assert.equal(result.status,"PASS");assert.equal(result.schemaVersion,59);
     assert.deepEqual(await readFile(source),before);
     await assert.rejects(rehearseDataUpgrade(source,output),error=>error.code==="UPGRADE_TARGET_EXISTS");
     const read=new DatabaseSync(result.snapshot,{readOnly:true});assert.equal(read.prepare("PRAGMA integrity_check").get().integrity_check,"ok");read.close();
