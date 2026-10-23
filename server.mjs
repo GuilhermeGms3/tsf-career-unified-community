@@ -115,6 +115,7 @@ import { createMobileGateway } from "./server/mobile/mobile-gateway.mjs";
 import { mobileGatewayConfig } from "./server/mobile/mobile-auth.mjs";
 import { runtimeOperationPolicy } from "./server/runtime-operation-policy.mjs";
 import {trustedWebConfig,authorizeWebRequest} from "./server/trusted-web-access.mjs";
+import {requireLocalApiRequest} from "./server/local-mutation-guard.mjs";
 
 const runtimePolicy = runtimeOperationPolicy();
 const webConfig = trustedWebConfig();
@@ -2503,6 +2504,7 @@ const server = createServer(async (req, res) => {
   }
   try{authorizeWebRequest(req,webConfig);}catch(error){sendError(res,error,{status:error.status||403,code:error.code,message:error.message});return;}
   const url = new URL(req.url || "/", webConfig.enabled?webConfig.origin:`http://${req.headers.host}`);
+  try{requireLocalApiRequest(req,url);}catch(error){sendError(res,error,{status:error.status||403,code:error.code,message:error.message});return;}
   if(url.pathname==="/api/runtime"&&req.method==="GET"){
     json(res,{ok:true,mode:runtimePolicy.mode,backgroundEnabled:runtimePolicy.backgroundEnabled,workersEnabled:runtimePolicy.workersEnabled,submissionEnabled,sessionRenewalEnabled:true});return;
   }
