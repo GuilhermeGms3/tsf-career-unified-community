@@ -1,4 +1,5 @@
 import { CERTIFICATION_DEFINITIONS, LANGUAGE_DEFINITIONS, SKILL_DEFINITIONS } from "./constants.mjs";
+import { escoSkillName, findEscoSkillMentions } from "./esco-skills.mjs";
 
 export function foldText(value) {
   return String(value || "")
@@ -52,6 +53,13 @@ export function findSkillMentions(text) {
       matches.push({ ...definition, alias: "ad", index: normalized.search(/\bad\b/) });
     }
   }
+  // ESCO complementa o dicionario curado: nunca repete um conceito curado nem disputa o mesmo trecho.
+  const curatedSpans = matches.map((item) => [item.index, item.index + foldText(item.alias).length]);
+  for (const mention of findEscoSkillMentions(normalized)) {
+    if (matches.some((item) => item.name === mention.name)) continue;
+    if (curatedSpans.some(([start, end]) => mention.index < end && start < mention.end)) continue;
+    matches.push(mention);
+  }
   return matches;
 }
 
@@ -65,7 +73,7 @@ export function normalizeSkillName(value, context = "") {
         : null;
     }
   }
-  return slugify(value) || null;
+  return escoSkillName(value) || slugify(value) || null;
 }
 
 export function findCertificationMentions(text) {

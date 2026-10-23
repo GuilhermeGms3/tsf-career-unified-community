@@ -188,7 +188,8 @@ export function extractJobRequirements(job) {
 
     const knownSkills = findSkillMentions(line);
     for (const skill of knownSkills) {
-      addRequirement(requirements, jobId, { type: skill.type || "skill", normalizedName: skill.name, originalText: line, ...importance, confidence: Math.max(importance.confidence, 0.9), metadata: { alias: skill.alias } });
+      // Rotulos ESCO vem de uma taxonomia ampla; confianca um pouco menor que a do dicionario curado.
+      addRequirement(requirements, jobId, { type: skill.type || "skill", normalizedName: skill.name, originalText: line, ...importance, confidence: Math.max(importance.confidence, skill.source === "esco" ? 0.82 : 0.9), metadata: { alias: skill.alias, ...(skill.escoId ? { escoId: skill.escoId, escoLabel: skill.label } : {}) } });
     }
     for (const skill of genericSkillCandidates(line).filter((candidate) => !knownSkills.some((known) => known.name === candidate.name || findSkillMentions(candidate.text).some((mention) => mention.name === known.name)))) {
       addRequirement(requirements, jobId, { type: "skill", normalizedName: skill.name, originalText: line, ...importance, confidence: Math.min(0.78, importance.confidence), metadata: { extractedText: skill.text } });

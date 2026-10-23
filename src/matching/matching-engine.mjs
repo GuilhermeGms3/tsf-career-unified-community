@@ -89,7 +89,8 @@ function matchLanguage(requirement, evidence) {
 function matchRoleOrDomain(requirement, evidence) {
   const candidateRoles = evidence.filter((item) => item.type === "role");
   if (!candidateRoles.length) return result(requirement, MATCH_STATUS.UNKNOWN, null, [], "Nenhum cargo alvo foi informado.");
-  const requiredWords = requirement.normalizedName.split("-").filter((word) => word.length > 2);
+  // Cargos em portugues flexionam em genero ("enfermeiro"/"enfermeira"): compara sem a vogal final.
+  const requiredWords = requirement.normalizedName.split("-").filter((word) => word.length > 2).map((word) => word.length > 5 ? word.replace(/[ao]s?$/, "") : word);
   const matches = candidateRoles.filter((item) => requiredWords.some((word) => item.normalizedName.includes(word)));
   if (matches.length) return result(requirement, MATCH_STATUS.MATCH, 0.85, matches.slice(0, 2), "O cargo ou dominio esta alinhado aos objetivos declarados.");
   return result(requirement, MATCH_STATUS.NO_MATCH, 0, candidateRoles.slice(0, 2), "O cargo nao aparece entre os objetivos declarados.");
