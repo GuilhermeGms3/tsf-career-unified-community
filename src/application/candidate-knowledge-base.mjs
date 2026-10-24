@@ -1,8 +1,13 @@
 import {knowledgeUnitsFromAggregate} from "../candidate-knowledge/candidate-knowledge-normalizer.mjs";
 import {canReuseKnowledge} from "../candidate-knowledge/candidate-knowledge-policy.mjs";
+import {languageLevel} from "../matching/normalization.mjs";
 
 const fact=(key,value,{source="CANDIDATE_PROFILE",sourceType="CANDIDATE_PROFILE",verificationStatus="USER_CONFIRMED",confidence=1,unitType="APPLICATION_FACT",sensitive=false,reusePolicy=null}={})=>value===undefined||value===null||value===""?null:{key,value,source,sourceType,verificationStatus,verified:["USER_CONFIRMED","IMPORTED_CONFIRMED"].includes(verificationStatus),confidence,unitType,sensitive,reusePolicy:reusePolicy||(sensitive?"SENSITIVE_CONFIRM_EACH_TIME":"REUSABLE"),classification:sensitive?"SENSITIVE":unitType.includes("PREFERENCE")?"PREFERENCE":"FACT",rawText:typeof value==="string"?value:"",provenance:{profilePath:key}};
 const list=value=>Array.isArray(value)?value:value===undefined||value===null||value===""?[]:[value];
+// Idioma confirmado com nivel ("Ingles avancado", "B2") responde "Qual seu nivel de ingles?"; o adapter
+// escolhe a opcao do formulario sem exagerar o nivel (it-question-answers.mjs).
+const LANGUAGE_LEVEL_KEYS={english:"PROFESSIONAL.ENGLISH_LEVEL",spanish:"PROFESSIONAL.SPANISH_LEVEL"},LEVEL_LABELS={1:"Básico",2:"Intermediário",3:"Avançado",4:"Fluente",5:"Nativo"};
+const languageLevelFacts=facts=>facts.flatMap(item=>{const key=item.unitType==="LANGUAGE"&&LANGUAGE_LEVEL_KEYS[String(item.key||"").replace(/^language\./,"")];if(!key)return [];const level=languageLevel(item.value&&typeof item.value==="object"?[item.value.level,item.value.proficiency,item.rawText].filter(Boolean).join(" "):String(item.value??item.rawText??""));return level?[{...item,key,value:LEVEL_LABELS[level],provenance:{...(item.provenance||{}),languageKey:item.key}}]:[];});
 
 export class CandidateKnowledgeBase {
   constructor(facts=[]){this.facts=new Map(facts.filter(Boolean).map(item=>[item.key,item]));this.confirmedAnswers=[];}
@@ -13,7 +18,7 @@ export class CandidateKnowledgeBase {
 
   static fromFacts(facts=[],answers=[]){
     const reusable=facts.filter(item=>!item.sensitive&&(canReuseKnowledge(item)||(!item.lifecycleStatus&&item.reusePolicy==="REUSABLE"&&["USER_CONFIRMED","IMPORTED_CONFIRMED"].includes(item.verificationStatus))));
-    return new CandidateKnowledgeBase(reusable).withConfirmedAnswers(answers);
+    return new CandidateKnowledgeBase([...languageLevelFacts(reusable),...reusable]).withConfirmedAnswers(answers);
   }
 
   static fromProfile(profile={}){

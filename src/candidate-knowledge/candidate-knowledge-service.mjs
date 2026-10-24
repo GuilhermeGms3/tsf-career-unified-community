@@ -61,18 +61,27 @@ export class CandidateKnowledgeService {
   skillDetail(key){const fact=this.facts.find(key,{includeInactive:true});if(!fact)throw apiError("Competência não encontrada.","CANDIDATE_FACT_NOT_FOUND",404);const evidence=this.evidence?.evidence({factKey:key})||[];return {...this.skillDto(fact,evidence),evidence:evidence.map(item=>({...item,claims:this.evidence.claims(item.id)})),years:unionYears(evidence.filter(x=>!x.negative&&["PROFESSIONAL","FREELANCE"].includes(x.contextType)))};}
   skillDto(fact,evidence){const confirmed=evidence.filter(x=>x.verificationStatus==="USER_CONFIRMED"&&!x.negative),best=[...confirmed].sort((a,b)=>(DEPTH_SCORE[b.depth]||0)-(DEPTH_SCORE[a.depth]||0))[0];return {key:fact.key,canonicalSkill:String(fact.key).replace(/^skill\./,""),label:displayNameForUnit(fact),highestConfirmedDepth:best?.depth||"UNKNOWN",bestEvidence:best||null,contexts:[...new Set(confirmed.map(x=>x.contextType))],evidenceCount:evidence.length,lastUsed:[...evidence].sort((a,b)=>String(b.lastUsedAt||b.endDate).localeCompare(String(a.lastUsedAt||a.endDate)))[0]?.lastUsedAt||"",verification:fact.verificationStatus,pending:evidence.some(x=>x.verificationStatus==="REVIEW_REQUIRED"),reusePolicy:fact.reusePolicy};}
 
+  // Fatos de candidatura das evidencias confirmadas: anos por tecnologia (profissional/freelance), "tem
+  // experiencia" (uso profissional/freelance), "tem conhecimento" (uso real em qualquer contexto, nao so
+  // leitura) e "nunca usei" confirmado, que responde Nao as duas perguntas.
   applicationFacts(){
     if(!this.evidence)return [];
     const grouped=new Map();
     for(const item of this.evidence.evidence()){
-      if(item.negative||item.verificationStatus!=="USER_CONFIRMED"||!["PROFESSIONAL","FREELANCE"].includes(item.contextType)||item.reusePolicy!=="REUSABLE")continue;
+      if(item.verificationStatus!=="USER_CONFIRMED"||item.reusePolicy!=="REUSABLE")continue;
       if(!grouped.has(item.factKey))grouped.set(item.factKey,[]);
       grouped.get(item.factKey).push(item);
     }
+    const fact=(key,value,items)=>({key,value,source:"CAREER_EVIDENCE_GRAPH",sourceType:"CAREER_EVIDENCE_GRAPH",verificationStatus:"USER_CONFIRMED",verified:true,confidence:1,unitType:"APPLICATION_FACT",sensitive:false,reusePolicy:"REUSABLE",classification:"FACT",provenance:{evidenceIds:items.map(item=>item.id)}});
+    const used=item=>(DEPTH_SCORE[item.depth]||0)>=DEPTH_SCORE.USED;
     return [...grouped.entries()].flatMap(([factKey,items])=>{
-      const years=unionYears(items);if(years===null)return [];
-      const canonical=String(factKey).replace(/^(?:skill|tool|technology)\./,"");
-      return [{key:`PROFESSIONAL.SKILL_YEARS.${canonical}`,value:years,source:"CAREER_EVIDENCE_GRAPH",sourceType:"CAREER_EVIDENCE_GRAPH",verificationStatus:"USER_CONFIRMED",verified:true,confidence:1,unitType:"APPLICATION_FACT",sensitive:false,reusePolicy:"REUSABLE",classification:"FACT",provenance:{evidenceIds:items.map(item=>item.id)}}];
+      const canonical=String(factKey).replace(/^(?:skill|tool|technology)\./,""),positive=items.filter(item=>!item.negative),never=!positive.length;
+      const professional=positive.filter(item=>["PROFESSIONAL","FREELANCE"].includes(item.contextType)),worked=professional.filter(used),practiced=positive.filter(used);
+      const years=professional.length?unionYears(professional):null,facts=[];
+      if(years!==null)facts.push(fact(`PROFESSIONAL.SKILL_YEARS.${canonical}`,years,professional));
+      if(worked.length||never)facts.push(fact(`PROFESSIONAL.SKILL_HAS.${canonical}`,worked.length>0,worked.length?worked:items));
+      if(practiced.length||never)facts.push(fact(`PROFESSIONAL.SKILL_KNOWS.${canonical}`,practiced.length>0,practiced.length?practiced:items));
+      return facts;
     });
   }
 

@@ -3,6 +3,7 @@ import { classifyQuestion, FIELD_CONFIDENCE, normalizeQuestionText, questionFing
 import { canAutofillApplicationField } from "../../../candidate-knowledge/candidate-knowledge-policy.mjs";
 import { validateFormAnswer } from "../../../application/form-answer-format.mjs";
 import { reusableFormAnswer, requiresApplicationConfirmation } from "../../../application/answer-reuse-policy.mjs";
+import { isItAnswerKey, itAnswerForField } from "../../../application/it-question-answers.mjs";
 
 function authorizedFrame(page, frame) {
   if (frame === page.mainFrame()) return true;
@@ -65,15 +66,16 @@ export class GenericAdapter {
   }
   mapFields(inspected,knowledge,questions=[],candidateAnswers=knowledge.confirmedAnswers||[]) {
     return inspected.fields.map(field=>{const question=questions.find(x=>x.fingerprint&&x.fingerprint===field.fingerprint)||questions.find(x=>x.externalKey===field.externalKey&&!x.fingerprint);const memory=reusableFormAnswer(field,candidateAnswers);const candidateFact=knowledge.get(field.semanticKey),known=candidateFact?.sourceType==="APPLICATION_ANSWER"?null:candidateFact;let answer;let answerSource="";let answerStatus=field.required?"USER_REQUIRED":"UNKNOWN";
-      let autofillAuthority=null,explicitConfirmation=false;
+      let autofillAuthority=null,explicitConfirmation=false,fromKnowledge=false;
       if(question?.answerStatus==="KNOWN"&&confirmedQuestionSources.has(question.answerSource)){answer=question.answerValue;answerSource=question.answerSource;answerStatus="KNOWN";explicitConfirmation=["USER_CONFIRMED","LLM_APPROVED","user"].includes(question.answerSource);autofillAuthority={verificationStatus:explicitConfirmation?"USER_CONFIRMED":"IMPORTED_CONFIRMED",verified:true,reusePolicy:"REUSABLE"};}
       else if(!field.sensitive&&!field.consentType&&memory){answer=memory.answerValue;answerSource="USER_CONFIRMED";answerStatus="KNOWN";}
-      else if(!field.sensitive&&!field.consentType&&field.confidence>=FIELD_CONFIDENCE.AUTO_FILL&&known){answer=known.value;answerSource=known.source;answerStatus=known.verified?"KNOWN":"DERIVED";}
+      else if(!field.sensitive&&!field.consentType&&field.confidence>=FIELD_CONFIDENCE.AUTO_FILL&&known){answer=known.value;answerSource=known.source;answerStatus=known.verified?"KNOWN":"DERIVED";fromKnowledge=true;}
       if(field.required&&field.confidence<FIELD_CONFIDENCE.REVIEW&&!hasAnswer(question?.answerValue)){answer=undefined;answerStatus="USER_REQUIRED";}
       if(!autofillAuthority)autofillAuthority=memory&&answerSource==="USER_CONFIRMED"?{verificationStatus:"USER_CONFIRMED",verified:true,reusePolicy:"REUSABLE"}:known;
       const autofillEligible=(!requiresApplicationConfirmation(field)||explicitConfirmation)&&canAutofillApplicationField(autofillAuthority,field,{explicit:explicitConfirmation});
       if(answer!==undefined&&!autofillEligible)answerStatus="USER_REQUIRED";
-      const format=hasAnswer(answer)?validateFormAnswer(field,answer):{valid:true,value:answer};
+      // Perguntas de TI: anos, Sim/Nao e nivel de idioma viram a opcao do formulario sem exagerar; sem opcao unica, fica com voce.
+      const format=!hasAnswer(answer)?{valid:true,value:answer}:fromKnowledge&&isItAnswerKey(field.semanticKey)?itAnswerForField(field,answer)||{valid:false,reason:"Nenhuma opção corresponde ao seu histórico confirmado; responda esta pergunta."}:validateFormAnswer(field,answer);
       if(!format.valid)answerStatus="USER_REQUIRED";
       else answer=format.value;
       return {...field,answer,answerSource,answerStatus,autofillAuthority,explicitConfirmation,autofillEligible,answerFormatInvalid:!format.valid,...(!format.valid?{reasonRequired:format.reason}:{})};
@@ -97,7 +99,8 @@ export class GenericAdapter {
           if(await option.count()!==1||!await option.isVisible()||await option.getAttribute("aria-disabled")==="true")throw Object.assign(new Error("Opcao exata nao encontrada."),{code:"OPTION_NOT_FOUND"});
           await option.click();
         }
-        else if(field.type==="select-one")await locator.first().selectOption({label:String(field.answer)}).catch(()=>locator.first().selectOption(String(field.answer)));
+        // A resposta mapeada e o value da opcao; buscar primeiro pelo rotulo esperava 30 s em toda lista com value diferente do texto.
+        else if(field.type==="select-one"){const control=locator.first(),value=String(field.answer),byValue=await control.evaluate((el,value)=>[...el.options].some(option=>option.value===value),value);await control.selectOption(byValue?value:{label:value});}
         else if(field.type==="select-multiple")await locator.first().selectOption(Array.isArray(field.answer)?field.answer.map(String):[String(field.answer)]);
         else if(field.type==="checkbox"){if(Boolean(field.answer))await locator.first().check();else await locator.first().uncheck();}
         else if(field.type==="checkbox-group"||field.type==="radio-group"){const values=Array.isArray(field.answer)?field.answer.map(x=>String(x).toLowerCase()):[String(field.answer).toLowerCase()];let selected=0;for(let i=0;i<await locator.count();i++){const option=locator.nth(i);const value=String(await option.getAttribute("value")||"").toLowerCase();const label=String(await option.evaluate(el=>el.closest("label")?.textContent||"")).trim().toLowerCase();if(values.some(x=>x===value||x===label||(x==="true"&&/yes|sim|true|1/.test(value+" "+label)))){await option.check();selected++;if(field.type==="radio-group")break;}}if(!selected)throw Object.assign(new Error("Opcao conhecida nao encontrada."),{code:"OPTION_NOT_FOUND"});}

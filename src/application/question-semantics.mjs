@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { SKILL_DEFINITIONS } from "../matching/constants.mjs";
+import { levelOptions, yearOptions, yesNoOptions } from "./it-question-answers.mjs";
 
 export const FIELD_CONFIDENCE = Object.freeze({ AUTO_FILL: 0.85, REVIEW: 0.6 });
 
@@ -30,20 +31,37 @@ const rules = [
 const sensitivePattern = /disabil|veteran|ethnic|race|\braca\b|gender|sex|medical|saude|deficien|etnia|genero|orientacao sexual|laudo medico|\bcid\b|protected class|preferred pronouns?|pronomes? preferid/;
 const consentRules = [["PRIVACY_POLICY",/privacy|privacidade/],["DATA_PROCESSING",/data processing|tratamento de dados/],["DATA_RETENTION",/retention|retencao/],["TERMS",/terms|termos/]];
 
-function skillYearsKey(text){
-  if(!/(?:years?|anos?).*(?:experience|experiencia)|(?:experience|experiencia).*(?:years?|anos?)/.test(text))return "";
-  const aliases=SKILL_DEFINITIONS.flatMap(skill=>skill.aliases.map(alias=>({name:skill.name,alias:normalize(alias)}))).sort((a,b)=>b.alias.length-a.alias.length);
-  const hit=aliases.find(item=>new RegExp(`(?:^|\\s)${item.alias.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")}(?:$|\\s)`).test(text));
-  return hit?`PROFESSIONAL.SKILL_YEARS.${hit.name}`:"";
+const SKILL_ALIASES=SKILL_DEFINITIONS.flatMap(skill=>skill.aliases.map(alias=>({name:skill.name,pattern:new RegExp(`(?:^|\\s)${normalize(alias).replace(/[.*+?^${}()|[\]\\]/g,"\\$&")}(?:$|\\s)`)})));
+const skillsIn=text=>[...new Set(SKILL_ALIASES.filter(item=>item.pattern.test(text)).map(item=>item.name))];
+const YEARS_TEXT=/(?:years?|anos?|tempo).*(?:experience|experiencia)|(?:experience|experiencia).*(?:years?|anos?|tempo)|ha quanto tempo|how long/;
+const HAS_TEXT=/experiencia|experience|trabalhou|trabalha com|atuou|atua com|worked with|work with/;
+const KNOWS_TEXT=/conhecimento|conhece|familiaridade|domina|dominio|knowledge|familiar with/;
+const LANGUAGE_LEVELS=[["ENGLISH_LEVEL","PROFESSIONAL.ENGLISH_LEVEL",/\bingles\b|\benglish\b/],["SPANISH_LEVEL","PROFESSIONAL.SPANISH_LEVEL",/\bespanhol\b|\bspanish\b/]];
+const GENERIC_YEARS_WORDS=new Set("quantos quantas qual seu sua voce tem possui ha anos ano de da do em na no e o a com experiencia profissional total area ti tecnologia informacao mercado trabalho carreira tempo years year of experience professional how many long do you have in the it field overall work".split(" "));
+const itFact=(questionClass,semanticKey,signals=[])=>({questionClass,semanticKey,answerCategory:"FACT",sensitive:false,consentType:"",confidence:0.96,signals:[`classification:${questionClass}`,...signals]});
+const booleanShaped=field=>(field.type||field.fieldType)==="checkbox"&&!field.options?.length||Boolean(yesNoOptions(field.options||[]));
+
+// Perguntas de TI respondidas pelo conhecimento confirmado (it-question-answers.mjs): anos com uma
+// tecnologia (texto ou faixas), "Possui experiencia/conhecimento em X?" (Sim/Nao) e nivel de idioma.
+// Uma tecnologia so: "Java ou Python?" fica com voce.
+function itQuestion(field,text){
+  const subject=normalize([field.label,field.description].filter(Boolean).join(" "))||text,skills=skillsIn(subject),skill=skills.length===1?skills[0]:"",options=field.options||[];
+  if(skill&&(YEARS_TEXT.test(subject)||(HAS_TEXT.test(subject)||KNOWS_TEXT.test(subject))&&yearOptions(options)))return itFact("SKILL_YEARS_EXPERIENCE",`PROFESSIONAL.SKILL_YEARS.${skill}`,["source:CAREER_EVIDENCE_GRAPH"]);
+  if(skill&&booleanShaped(field)&&KNOWS_TEXT.test(subject))return itFact("SKILL_KNOWLEDGE",`PROFESSIONAL.SKILL_KNOWS.${skill}`,["source:CAREER_EVIDENCE_GRAPH"]);
+  if(skill&&booleanShaped(field)&&HAS_TEXT.test(subject))return itFact("SKILL_EXPERIENCE_YES_NO",`PROFESSIONAL.SKILL_HAS.${skill}`,["source:CAREER_EVIDENCE_GRAPH"]);
+  for(const [questionClass,semanticKey,language] of LANGUAGE_LEVELS)if(language.test(subject)&&(levelOptions(options)||/nivel|level|proficien|fluencia/.test(subject)))return itFact(questionClass,semanticKey);
+  return null;
 }
+// "Quantos anos de experiencia voce tem?" e o total de carreira; "anos com Rust" ou "em suporte" nao.
+const genericYears=text=>normalize(text).split(" ").filter(Boolean).every(word=>GENERIC_YEARS_WORDS.has(word));
 
 export function classifyQuestion(field) {
   const text = normalize([field.label, field.description, field.name, field.id].filter(Boolean).join(" "));
   const consent = consentRules.find(([, pattern]) => pattern.test(text));
   if (consent) return { questionClass:"CONSENT", semanticKey:`CONSENT.${consent[0]}`, answerCategory:"CONSENT", sensitive:false, consentType:consent[0], confidence:0.98, signals:[`consent:${consent[0]}`] };
   if (sensitivePattern.test(text)) return { questionClass:"DEMOGRAPHIC", semanticKey:"DEMOGRAPHIC.SENSITIVE", answerCategory:"APPLICATION_SPECIFIC", sensitive:true, consentType:"", confidence:0.98, signals:["protected-or-sensitive-question"] };
-  const evidenceYearsKey=skillYearsKey(text);if(evidenceYearsKey)return {questionClass:"SKILL_YEARS_EXPERIENCE",semanticKey:evidenceYearsKey,answerCategory:"FACT",sensitive:false,consentType:"",confidence:0.96,signals:["classification:SKILL_YEARS_EXPERIENCE","source:CAREER_EVIDENCE_GRAPH"]};
-  for (const [questionClass, semanticKey, pattern, answerCategory] of rules) if (pattern.test(text)) return { questionClass, semanticKey, answerCategory, sensitive:false, consentType:"", confidence:0.9, signals:[`classification:${questionClass}`] };
+  const it=itQuestion(field,text);if(it)return it;
+  for (const [questionClass, semanticKey, pattern, answerCategory] of rules) if (pattern.test(text) && (questionClass !== "YEARS_EXPERIENCE" || genericYears(field.label || text))) return { questionClass, semanticKey, answerCategory, sensitive:false, consentType:"", confidence:0.9, signals:[`classification:${questionClass}`] };
   return { questionClass:"CUSTOM_UNKNOWN", semanticKey:field.semanticKey && field.semanticKey !== "CUSTOM.QUESTION" ? field.semanticKey : "CUSTOM.QUESTION", answerCategory:"APPLICATION_SPECIFIC", sensitive:false, consentType:"", confidence:field.confidence || 0, signals:[] };
 }
 
