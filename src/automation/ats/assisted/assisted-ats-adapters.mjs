@@ -1,14 +1,67 @@
 import { HostedAtsAdapter } from "../hosted/hosted-ats-adapter.mjs";
-import { portalSubmitProfile } from "../last-mile/portal-submit-profiles.mjs";
-import { submitWithProfile } from "../last-mile/last-mile-engine.mjs";
+import { assessAdapterHealth } from "../greenhouse/adapter-health.mjs";
+import { detectChallenge } from "../../challenge-detection.mjs";
+import { portalSubmitProfile, vaultSubmitEnabled } from "../last-mile/portal-submit-profiles.mjs";
+import { findEntry, findFinalButton, progressiveSubmit } from "../last-mile/last-mile-engine.mjs";
+
+// Estado da pagina para a ultima milha: assinatura dos campos e titulos visiveis, desafio humano e campos.
+export async function vaultPageState(page) {
+  const snapshot = await page.evaluate(() => {
+    const visible = (element) => element.getClientRects().length > 0;
+    const fields = [...document.querySelectorAll("input:not([type=hidden]):not([type=search]),select,textarea")].filter(visible);
+    const headings = [...document.querySelectorAll("h1,h2,h3,legend,[role=dialog] [role=heading]")].filter(visible).map((item) => item.textContent.trim());
+    return { fields: fields.length, signature: [location.pathname, ...fields.map((item) => `${item.tagName}:${item.type || ""}:${item.name || item.id || ""}`), ...headings].join("|") };
+  });
+  return { ...snapshot, challenge: await detectChallenge(page) };
+}
 
 class AssistedAtsAdapter extends HostedAtsAdapter {
   constructor(type, version) {
     super(type, version);
     this.submitProfile = portalSubmitProfile(type);
-    // Adapter assistido nao tem submit. Portal com Cofre ganha a ultima milha por perfil so quando o
-    // perfil estiver COMPLETE; ainda assim o registry precisa promove-lo a Controlled Submit.
-    if (this.submitProfile?.status === "COMPLETE") this.submit = (page, options = {}) => submitWithProfile(page, this.submitProfile, options);
+    // Adapter assistido nao tem submit. Portal com Cofre ganha a ultima milha progressiva so com perfil
+    // COMPLETE ou liberado por opt-in (CAREER_VAULT_SUBMIT_PROVIDERS); o registry promove o mesmo conjunto.
+    if (this.submitProfile && (this.submitProfile.status === "COMPLETE" || vaultSubmitEnabled(type))) this.submit = (page, options = {}) => this.progressiveSubmit(page, options);
+  }
+
+  async entryOutsideForm(page) {
+    const entry = await findEntry(page, this.submitProfile).catch(() => null);
+    return Boolean(entry) && !await entry.evaluate((element) => {
+      const form = element.closest("form");
+      return Boolean(form && [...form.querySelectorAll("input:not([type=hidden]):not([type=search]),select,textarea")].some((input) => input.getClientRects().length));
+    }).catch(() => true);
+  }
+
+  // Fronteira do envio: o botao de entrada na pagina da vaga, ou o botao final do formulario logado.
+  async findSubmitBoundary(page) {
+    if (await this.entryOutsideForm(page)) return findEntry(page, this.submitProfile);
+    const final = await findFinalButton(page, this.submitProfile);
+    if (!final) throw Object.assign(new Error(`Boundary final ${this.submitProfile.label} ausente.`), { code: `${this.submitProfile.codePrefix}_SUBMIT_BOUNDARY_MISSING` });
+    return final.candidate;
+  }
+
+  progressiveSubmit(page, options = {}) {
+    return this.entryOutsideForm(page).then((entryFirst) => progressiveSubmit(page, this.submitProfile, { ...options, inspect: vaultPageState, entryFirst }));
+  }
+
+  // Duas paginas dos Cofres que a inspecao generica chamava de "layout nao suportado":
+  // - pagina da vaga com o botao de entrada ("Candidatar-se") fora de formulario: cenario apply-entry,
+  //   sem campos a preencher (busca e newsletter da pagina nao sao da candidatura). O clique de entrada
+  //   pode enviar, entao fica para o envio com consentimento; aqui ele nunca acontece.
+  // - questionario logado sem nome, e-mail ou CV: com a sessao do Cofre o portal ja tem esses dados.
+  async inspectApplicationForm(page, options = {}) {
+    const inspected = await super.inspectApplicationForm(page, options);
+    const schema = inspected.schema, signals = schema?.unsupportedSignals || [];
+    if (!this.submitProfile || !signals.some((signal) => ["NO_FORM_FIELDS", "NO_APPLICATION_IDENTITY_FIELDS"].includes(signal))) return inspected;
+    if (await this.entryOutsideForm(page)) {
+      const warnings = [{ code: "ENTRY_CLICK_MAY_SUBMIT" }, ...(options.sessionApplied ? [] : [{ code: "VAULT_SESSION_MISSING" }])];
+      return { ...inspected, fields: [], schema: { ...schema, variant: "apply-entry", fields: [], warnings, unsupportedSignals: [], health: "HEALTHY", compatibilityConfidence: 0.8, unknownFields: 0 } };
+    }
+    if (options.sessionApplied && inspected.fields.length && !signals.includes("NO_FORM_FIELDS")) {
+      const unsupportedSignals = signals.filter((signal) => signal !== "NO_APPLICATION_IDENTITY_FIELDS");
+      return { ...inspected, schema: { ...schema, variant: "logged-in-form", ...assessAdapterHealth({ fields: inspected.fields, warnings: schema.warnings || [], unsupportedSignals }) } };
+    }
+    return inspected;
   }
 }
 

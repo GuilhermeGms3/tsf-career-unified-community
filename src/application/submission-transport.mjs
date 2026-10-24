@@ -29,11 +29,13 @@ export class AdapterSubmissionTransport{
     if(target.localFixture?!this.allowLocalFixtures:!this.allowExternal)throw Object.assign(new Error("Runtime não autoriza submit para este tipo de target."),{code:"SUBMISSION_RUNTIME_NOT_ALLOWED",phase:"PRE_ACTION"});
     const prepared=await this.revalidator.prepareForSubmit(command.applicationId,{expectedPreflight:command.preflight});
     try{
-      await assertResumeAttached(prepared.session.page,prepared.selected.artifact?.contentHash,prepared.mapped);
+      // Portal com Cofre sem campo de CV envia o curriculo salvo na conta: fica registrado, nao ha PDF a conferir.
+      if(prepared.resumeSource==="PORTAL_PROFILE")this.store?.applications.recordEvent(command.applicationId,"SUBMISSION_USES_PORTAL_RESUME",{submissionAttemptId:command.attemptId,adapterType:command.adapterType});
+      else await assertResumeAttached(prepared.session.page,prepared.selected.artifact?.contentHash,prepared.mapped);
       await this.captureEvidence(prepared,command,"before");
       await command.onActionArmed?.();
       let outcome;
-      try{outcome=await prepared.adapter.submit(prepared.session.page,{onActionTriggered:command.onActionTriggered,confirmationTimeoutMs:this.confirmationTimeoutMs});}
+      try{outcome=await prepared.adapter.submit(prepared.session.page,{...prepared.submitOptions,onActionTriggered:command.onActionTriggered,confirmationTimeoutMs:this.confirmationTimeoutMs});}
       catch(error){await this.captureEvidence(prepared,command,"uncertain");throw error;}
       const sha256=await this.captureEvidence(prepared,command,outcome.status==="SUBMITTED"?"confirmed":"uncertain");
       if(outcome.receipt&&sha256)outcome.receipt.metadata={...outcome.receipt.metadata,screenshotSha256:sha256};

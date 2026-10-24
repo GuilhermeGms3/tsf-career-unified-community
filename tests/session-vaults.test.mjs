@@ -39,17 +39,20 @@ test('EMPREGARE usa o mesmo cofre criptografado sem compartilhar cookies com out
   assert.equal((await auth.completeSession(request.id,ticket,state)).status,'SESSION_ACTIVE');assert.equal(auth.storageState('empregare','careers.empregare.com').cookies[0].domain,'.empregare.com');assert.equal(auth.storageState('indeed'),undefined);assert.ok(!(await readFile(vault.vaultPath,'utf8')).includes('synthetic-empregare-session'));
 }));
 
-test('local session expires in seven days or at the earliest persistent cookie',()=>{
+test('local session expires in seven days or at the earliest persistent session cookie',()=>{
   const clock=()=>Date.parse('2026-10-09T12:00:00.000Z');
   assert.equal(effectiveSessionExpiry(indeedState(),168,clock),'2026-10-16T12:00:00.000Z');
-  const state=indeedState();state.cookies[0].expires=clock()/1000+3600;
-  assert.equal(effectiveSessionExpiry(state,168,clock),'2026-10-09T13:00:00.000Z');
+  const state=indeedState();state.cookies[0].expires=clock()/1000+3*3600;
+  assert.equal(effectiveSessionExpiry(state,168,clock),'2026-10-09T15:00:00.000Z');
+  // Anti-bot da Cloudflare (__cf_bm) vive 30 minutos e nao pode derrubar a sessao do Cofre.
+  const withBotCookie=indeedState();withBotCookie.cookies.push({...withBotCookie.cookies[0],name:'__cf_bm',expires:clock()/1000+1800});
+  assert.equal(effectiveSessionExpiry(withBotCookie,168,clock),'2026-10-16T12:00:00.000Z');
 });
 
-test('foreign cookies and secret-like local storage cannot enter a provider vault',()=>{
+test('foreign cookies and passwords cannot enter a provider vault; SPA session tokens can',()=>{
   assert.throws(()=>validateProviderState({...indeedState(),cookies:[{...indeedState().cookies[0],domain:'.catho.com.br'}]},'indeed'),/ISOLATION/);
-  const state={...indeedState(),origins:[{origin:'https://secure.indeed.com',localStorage:[{name:'locale',value:'pt-BR'},{name:'access_token',value:'secret'}]}]};
-  assert.deepEqual(validateProviderState(state,'indeed').origins[0].localStorage,[{name:'locale',value:'pt-BR'}]);
+  const state={...indeedState(),origins:[{origin:'https://secure.indeed.com',localStorage:[{name:'locale',value:'pt-BR'},{name:'access_token',value:'spa-session'},{name:'savedPassword',value:'never'}]}]};
+  assert.deepEqual(validateProviderState(state,'indeed').origins[0].localStorage,[{name:'locale',value:'pt-BR'},{name:'access_token',value:'spa-session'}]);
 });
 
 test('session activation requires positive portal evidence',async()=>{

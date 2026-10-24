@@ -9,13 +9,23 @@ const sessionPending=new Set(['AUTH_REQUIRED','LAUNCH_PENDING','AUTH_IN_PROGRESS
 const managedProviders=new Set(SESSION_PROVIDER_IDS);
 const runnerFailures=new Set(['PROTOCOL_HANDLER_FAILED','RUNNER_START_FAILED','NODE_NOT_FOUND','CHROMIUM_NOT_FOUND','CLAIM_FAILED','BROWSER_START_FAILED','BROWSER_NAVIGATION_FAILED','BROWSER_CLOSED','RUNNER_LOST','SESSION_VALIDATION_FAILED']);
 export const privateNetworkDestination=value=>{try{publicUrl(value);return false;}catch{return true;}};
+// Cookies de infraestrutura (anti-bot como __cf_bm, balanceador) vivem minutos e nao medem a sessao.
+// Uma sessao que morre antes e detectada no uso: o portal pede login e o Cofre e marcado como expirado.
+export const INFRASTRUCTURE_COOKIE_MS = 2 * 3600000;
 export const effectiveSessionExpiry = (state, sessionHours, clock = Date.now) => {
   const localLimit = clock() + Number(sessionHours || 0) * 3600000;
   const cookieLimits = (state?.cookies || [])
     .map((cookie) => Number(cookie.expires) * 1000)
-    .filter((expiresAt) => Number.isFinite(expiresAt) && expiresAt > clock());
+    .filter((expiresAt) => Number.isFinite(expiresAt) && expiresAt > clock() + INFRASTRUCTURE_COOKIE_MS);
   return new Date(Math.min(localLimit, ...cookieLimits)).toISOString();
 };
+// Pagina onde o runner comprovou o login: so https, host oficial do Cofre, sem query nem fragmento.
+export function verificationUrl(policy, value) {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && !url.username && !url.password && !url.port && hostAllowed(policy, url.hostname) ? `${url.origin}${url.pathname}` : "";
+  } catch { return ""; }
+}
 export class SourceAuthService {
   constructor({store,vault,connections,githubEvidence,githubClientId=process.env.GITHUB_OAUTH_CLIENT_ID||'',fetchImpl=fetch,verifySession=null,clock=Date.now,launchTimeoutMs=20000,runnerLeaseMs=30000}){
     Object.assign(this,{clock,launchTimeoutMs,runnerLeaseMs});
@@ -145,11 +155,11 @@ export class SourceAuthService {
     else fail('AUTH_RUNNER_EVENT_INVALID',409);
     return this.publicRequest(this.request(id));
   }
-  async completeSession(id,ticket,state){
+  async completeSession(id,ticket,state,{authenticatedUrl=''}={}){
     const r=this.authorize(id,ticket,'USER_ACTION_REQUIRED');if(this.busy.has(id))fail('AUTH_COMPLETION_IN_PROGRESS');this.busy.add(id);
     try{
-      const policy=sessionProviderById(r.provider),safe=validateProviderState(state,r.provider);this.update(id,'SESSION_VALIDATING',{...r.payload,validatingAt:new Date(this.clock()).toISOString()});this.event(r.provider,'SESSION_VALIDATING',r,{status:'SESSION_VALIDATING'});
-      if(!await this.verifySession(safe,policy.accountScope,r.provider))fail('AUTHENTICATED_STATE_NOT_CONFIRMED');
+      const policy=sessionProviderById(r.provider),safe=validateProviderState(state,r.provider),evidenceUrl=verificationUrl(policy,authenticatedUrl);this.update(id,'SESSION_VALIDATING',{...r.payload,validatingAt:new Date(this.clock()).toISOString(),authenticatedUrl:evidenceUrl});this.event(r.provider,'SESSION_VALIDATING',r,{status:'SESSION_VALIDATING'});
+      if(!await this.verifySession(safe,policy.accountScope,r.provider,{urls:evidenceUrl?[evidenceUrl]:[]}))fail('AUTHENTICATED_STATE_NOT_CONFIRMED');
       this.authorize(id,ticket,'SESSION_VALIDATING');const ref=`session-${randomUUID()}`,previous=this.db.prepare('SELECT credential_ref FROM provider_sessions WHERE provider=? AND tenant=?').get(r.provider,policy.accountScope);
       await this.vault.put(ref,JSON.stringify(safe));
       try{this.authorize(id,ticket,'SESSION_VALIDATING');}catch(error){await this.vault.remove(ref);throw error;}
@@ -163,11 +173,24 @@ export class SourceAuthService {
   }
   storageState(provider,tenant){const policy=sessionProviderById(provider);if(!policy)return undefined;const r=this.db.prepare('SELECT * FROM provider_sessions WHERE provider=? AND tenant=? LIMIT 1').get(provider,policy.accountScope);if(!r||r.status!=='SESSION_ACTIVE')return undefined;if(Date.parse(r.expires_at)<=this.clock()){this.expire(provider,r.tenant);return undefined;}try{const protectedState=this.vault.get(r.credential_ref);if(!protectedState)throw Object.assign(new Error('SESSION_VAULT_REFERENCE_MISSING'),{code:'SESSION_VAULT_REFERENCE_MISSING'});return validateProviderState(JSON.parse(protectedState),provider);}catch(error){const code=error.code==='SESSION_VAULT_REFERENCE_MISSING'?'SESSION_VAULT_REFERENCE_MISSING':'SESSION_VAULT_REFERENCE_INVALID';this.db.prepare("UPDATE provider_sessions SET status='SESSION_EXPIRED' WHERE provider=? AND tenant=?").run(provider,r.tenant);this.event(provider,code,{}, {level:'ERROR',errorCode:code});return undefined;}}
   expire(provider,tenant){const policy=sessionProviderById(provider),scope=policy?.accountScope||tenant;const changed=this.db.prepare("UPDATE provider_sessions SET status='SESSION_EXPIRED' WHERE provider=? AND tenant=? AND status='SESSION_ACTIVE'").run(provider,scope).changes;this.event(provider,changed?'SESSION_EXPIRED':'AUTH_REQUIRED',{}, {level:'WARN',errorCode:changed?'SESSION_EXPIRED':'AUTH_REQUIRED'});}
+  // O portal pediu login de novo com a sessao do Cofre aplicada: a sessao morreu antes da validade local.
+  // O Cofre volta a pedir conexao em vez de seguir entregando uma sessao recusada.
+  rejectSession(provider,{applicationId='',reason='PORTAL_LOGIN_REQUIRED'}={}){
+    const policy=sessionProviderById(provider);if(!policy)return false;
+    const changed=this.db.prepare("UPDATE provider_sessions SET status='SESSION_EXPIRED' WHERE provider=? AND tenant=? AND status='SESSION_ACTIVE'").run(provider,policy.accountScope).changes;
+    this.event(provider,'SESSION_REJECTED_BY_PORTAL',{id:applicationId,intent:'AUTOAPPLY'},{level:'WARN',errorCode:reason});return changed>0;
+  }
+  // Paginas que comprovam o login: a observada pelo runner na conexao mais recente, depois a de login.
+  verificationUrls(provider){
+    const policy=sessionProviderById(provider),row=this.db.prepare("SELECT payload_json FROM source_auth_requests WHERE provider=? AND status='SESSION_ACTIVE' ORDER BY created_at DESC,rowid DESC LIMIT 1").get(provider);
+    let stored='';try{stored=verificationUrl(policy,JSON.parse(row?.payload_json||'{}').authenticatedUrl||'');}catch{}
+    return stored?[stored]:[];
+  }
   async check(provider){
     if(provider==='github'){if(this.status(provider).status!=='CONNECTED')return this.status(provider);await this.connections.validateCredential('github',this.connections.secret('github')||process.env.GITHUB_TOKEN);return this.status(provider);}
     if(!managedProviders.has(provider))fail('AUTH_OPERATION_UNSUPPORTED',400);
     for(const r of this.db.prepare("SELECT tenant FROM provider_sessions WHERE provider=? AND status='SESSION_ACTIVE'").all(provider)){
-      const state=this.storageState(provider,r.tenant);if(state&&!await this.verifySession(state,r.tenant,provider))this.expire(provider,r.tenant);
+      const state=this.storageState(provider,r.tenant);if(state&&!await this.verifySession(state,r.tenant,provider,{urls:this.verificationUrls(provider)}))this.expire(provider,r.tenant);
     }return this.status(provider);
   }
   async disconnect(provider){
@@ -180,5 +203,7 @@ export class SourceAuthService {
     if(provider==='github'){await this.connections.remove(provider);this.store.database.setMetadata('github_disconnected','true');}
     this.event(provider,'DISCONNECTED');await this.onDisconnected?.(provider);return {status:'AUTH_REQUIRED'};
   }
-  async verifyInBrowser(state,tenant,providerId='gupy'){const policy=sessionProviderById(providerId);if(!policy)return false;const {chromium}=await import('playwright');const browser=await chromium.launch({headless:true});try{const context=await browser.newContext({storageState:state,serviceWorkers:"block"});const guard=await installPublicBrowserGuard(context,{navigationAllowed:url=>url.protocol==="https:"&&hostAllowed(policy,url.hostname)});const page=await context.newPage();await guard.protect(page);const verificationUrl=providerId==='gupy'?'https://portal.gupy.io/my/applications':policy.loginUrl;await page.goto(verificationUrl,{waitUntil:'domcontentloaded',timeout:15000});return await authenticatedProviderPage(page,providerId);}finally{await browser.close();}}
+  // Tenta cada pagina candidata ate achar evidencia positiva de login. A pagina de login fica por ultimo:
+  // muitos portais nao tiram da tela de login quem ja esta autenticado.
+  async verifyInBrowser(state,tenant,providerId='gupy',{urls=[]}={}){const policy=sessionProviderById(providerId);if(!policy)return false;const candidates=[...new Set([...(providerId==='gupy'?['https://portal.gupy.io/my/applications']:[]),...urls.map(value=>verificationUrl(policy,value)).filter(Boolean),policy.loginUrl])];const {chromium}=await import('playwright');const browser=await chromium.launch({headless:true});try{const context=await browser.newContext({storageState:state,serviceWorkers:"block"});const guard=await installPublicBrowserGuard(context,{navigationAllowed:url=>url.protocol==="https:"&&hostAllowed(policy,url.hostname)});const page=await context.newPage();await guard.protect(page);for(const candidate of candidates){try{await page.goto(candidate,{waitUntil:'domcontentloaded',timeout:15000});if(await authenticatedProviderPage(page,providerId))return true;}catch{}}return false;}finally{await browser.close();}}
 }

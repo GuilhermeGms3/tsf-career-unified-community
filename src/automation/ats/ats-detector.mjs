@@ -40,7 +40,7 @@ export class AtsDetector {
       ["infojobs",/(^|\.)infojobs\.com\.br$/i],
       ["vagas",/(^|\.)vagas\.com\.br$/i],
       ["catho",/(^|\.)catho\.com\.br$/i],
-      ["geekhunter",/(^|\.)geekhunter\.com\.br$/i],
+      ["geekhunter",/(^|\.)geekhunter\.com(\.br)?$/i],
       ["abler",/(^|\.)abler\.com\.br$/i],
       ["quickin",/(^|\.)jobs\.quickin\.io$/i],
     ];

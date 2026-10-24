@@ -5,8 +5,8 @@ import {createServer} from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {validateProviderState,authenticatedProviderPage} from '../src/source-connections/session-state.mjs';
-import {sessionProviderById,sessionProviderFromUrl,hostAllowed} from '../src/source-connections/session-provider-registry.mjs';
+import {validateProviderState,authenticatedProviderPage,ownedProviderState} from '../src/source-connections/session-state.mjs';
+import {sessionProviderById,sessionProviderFromUrl} from '../src/source-connections/session-provider-registry.mjs';
 
 // This runner only controls its own disposable context. Never reads installed browser profiles.
 export function parseAuthHandoff(handoff){
@@ -86,8 +86,9 @@ export async function runSourceAuth(handoff,{serverOrigin='',fetchImpl=fetch,loa
         if(authenticated){
           const state=await context.storageState();
           // Provider pages may load third-party state. Never transfer it into the application.
-          const owned={cookies:state.cookies.filter(cookie=>provider.cookieDomains.includes(String(cookie.domain||'').toLowerCase())&&cookie.secure&&['Strict','Lax','None'].includes(cookie.sameSite)&&typeof cookie.path==='string'&&cookie.path.startsWith('/')),origins:state.origins.filter(origin=>{try{return hostAllowed(provider,new URL(origin.origin).hostname);}catch{return false;}})};
-          failureCode='SESSION_VALIDATION_FAILED';await post('complete',{state:validateProviderState(owned,provider.id)});return {status:'SESSION_ACTIVE'};
+          const owned=ownedProviderState(state,provider.id),evidence=new URL(candidate.url());
+          // A pagina onde o login foi comprovado vira a verificacao das proximas checagens (sem query).
+          failureCode='SESSION_VALIDATION_FAILED';await post('complete',{state:validateProviderState(owned,provider.id),authenticatedUrl:`${evidence.origin}${evidence.pathname}`});return {status:'SESSION_ACTIVE'};
         }
       }
       await wait(1500);

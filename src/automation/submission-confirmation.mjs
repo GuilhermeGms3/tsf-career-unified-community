@@ -1,5 +1,5 @@
-const SUCCESS_TEXT = /(?:your )?application (?:has been |was |is )?(?:successfully )?(?:received|submitted|sent)|we (?:have )?received your application|thank you for (?:your application|applying)|successfully applied|candidatura (?:foi )?(?:enviada|recebida|realizada)(?: com sucesso)?|inscri[cç][aã]o (?:foi )?(?:enviada|recebida)|obrigado por se candidatar/i;
-const FAILURE_TEXT = /\b(?:not|cannot|failed|failure|error|unsuccessful|n[aã]o|erro|falha|imposs[ií]vel)\b/i;
+export const SUCCESS_TEXT = /(?:your )?application (?:has been |was |is )?(?:successfully )?(?:received|submitted|sent)|we (?:have )?received your application|thank you for (?:your application|applying)|successfully applied|candidatura (?:foi )?(?:enviada|recebida|realizada)(?: com sucesso)?|inscri[cç][aã]o (?:foi )?(?:enviada|recebida)|obrigado por se candidatar/i;
+export const FAILURE_TEXT = /\b(?:not|cannot|failed|failure|error|unsuccessful|n[aã]o|erro|falha|imposs[ií]vel)\b/i;
 
 async function visibleConfirmations(page) {
   const matches = page.getByText(SUCCESS_TEXT), counts = new Map();

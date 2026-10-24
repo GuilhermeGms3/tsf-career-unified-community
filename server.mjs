@@ -37,6 +37,8 @@ import {SmartRecruitersFinalRevalidator} from "./src/application/smartrecruiters
 import {WorkableFinalRevalidator} from "./src/application/workable-final-revalidator.mjs";
 import {NerdinFinalRevalidator} from "./src/application/nerdin-final-revalidator.mjs";
 import {TeamtailorFinalRevalidator} from "./src/application/teamtailor-final-revalidator.mjs";
+import {VaultFinalRevalidator,VAULT_REVALIDATOR_PROVIDERS} from "./src/application/vault-final-revalidator.mjs";
+import {LastMileAssistant} from "./src/intelligence/tasks/last-mile-assistant.mjs";
 import {FinalRevalidatorRouter} from "./src/application/final-revalidator-router.mjs";
 import {SubmissionReconciliationService} from "./src/application/submission-reconciliation-service.mjs";
 import { LiveInspector } from "./src/automation/live-inspector.mjs";
@@ -237,7 +239,9 @@ const smartRecruitersFinalRevalidator=new SmartRecruitersFinalRevalidator({store
 const workableFinalRevalidator=new WorkableFinalRevalidator({store:unifiedStore,dataDir:hubDataDir,registry:applicationEngine.registry,browserManager:submissionBrowserManager});
 const nerdinFinalRevalidator=new NerdinFinalRevalidator({store:unifiedStore,dataDir:hubDataDir,registry:applicationEngine.registry,browserManager:submissionBrowserManager});
 const teamtailorFinalRevalidator=new TeamtailorFinalRevalidator({store:unifiedStore,dataDir:hubDataDir,registry:applicationEngine.registry,browserManager:submissionBrowserManager});
-const finalRevalidator=new FinalRevalidatorRouter({store:unifiedStore,browserManager:submissionBrowserManager,revalidators:{greenhouse:greenhouseFinalRevalidator,lever:leverFinalRevalidator,ashby:ashbyFinalRevalidator,smartrecruiters:smartRecruitersFinalRevalidator,workable:workableFinalRevalidator,nerdin:nerdinFinalRevalidator,teamtailor:teamtailorFinalRevalidator}});
+// Cofres (menos Gupy): revalidacao generica com a sessao do Cofre; o envio so existe nos portais liberados por opt-in.
+const vaultFinalRevalidators=Object.fromEntries(VAULT_REVALIDATOR_PROVIDERS.map(provider=>[provider,new VaultFinalRevalidator({provider,store:unifiedStore,dataDir:hubDataDir,registry:applicationEngine.registry,browserManager:submissionBrowserManager})]));
+const finalRevalidator=new FinalRevalidatorRouter({store:unifiedStore,browserManager:submissionBrowserManager,revalidators:{...vaultFinalRevalidators,greenhouse:greenhouseFinalRevalidator,lever:leverFinalRevalidator,ashby:ashbyFinalRevalidator,smartrecruiters:smartRecruitersFinalRevalidator,workable:workableFinalRevalidator,nerdin:nerdinFinalRevalidator,teamtailor:teamtailorFinalRevalidator}});
 const submissionTransport=new AdapterSubmissionTransport({store:unifiedStore,registry:applicationEngine.registry,revalidator:finalRevalidator,allowExternal:submissionEnabled,allowLocalFixtures:false});
 const submissionPreflight=new SubmissionPreflight({store:unifiedStore,dataDir:hubDataDir,registry:applicationEngine.registry,revalidator:finalRevalidator,policy:{submissionEnabled}});
 const submissionConsentService=new SubmissionConsentService({store:unifiedStore});
@@ -2396,7 +2400,12 @@ const sourceAuth=new SourceAuthService({store:unifiedStore,vault:credentialVault
 const {createAutomationSessionProvider}=await import('./src/source-connections/automation-session-provider.mjs');
 const automationSessionProvider=createAutomationSessionProvider(sourceAuth);
 applicationEngine.sessionStateProvider=automationSessionProvider;
-for(const revalidator of [ashbyFinalRevalidator,smartRecruitersFinalRevalidator,workableFinalRevalidator,nerdinFinalRevalidator,teamtailorFinalRevalidator])revalidator.sessionStateProvider=automationSessionProvider;
+applicationEngine.onSessionRejected=(provider,context)=>sourceAuth.rejectSession(provider,context);
+for(const revalidator of [ashbyFinalRevalidator,smartRecruitersFinalRevalidator,workableFinalRevalidator,nerdinFinalRevalidator,teamtailorFinalRevalidator,...Object.values(vaultFinalRevalidators)])revalidator.sessionStateProvider=automationSessionProvider;
+for(const revalidator of Object.values(vaultFinalRevalidators))revalidator.onSessionRejected=(provider,context)=>sourceAuth.rejectSession(provider,context);
+// IA local na ultima milha dos Cofres (opt-in): escolhe entre botoes listados e confirma textos novos, sempre sob as travas deterministicas.
+const lastMileAssistant=process.env.CAREER_LAST_MILE_LLM==="true"?new LastMileAssistant(()=>intelligenceService):null;
+for(const revalidator of Object.values(vaultFinalRevalidators))revalidator.assistant=lastMileAssistant;
 const verifyActivePortalSessions=async()=>{
   for(const provider of SESSION_PROVIDER_IDS){
     if(sourceAuth.status(provider).status!=="SESSION_ACTIVE")continue;

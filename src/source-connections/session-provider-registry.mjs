@@ -141,8 +141,9 @@ const providers = [
     accountScope: "geekhunter.com.br",
     loginUrl: "https://www.geekhunter.com.br/login",
     signupUrl: "https://www.geekhunter.com.br/cadastro",
-    allowedHosts: ["*.geekhunter.com.br"],
-    cookieDomains: ["geekhunter.com.br", ".geekhunter.com.br"],
+    // O portal migrou para geekhunter.com (o .com.br responde 301); os dois dominios sao oficiais.
+    allowedHosts: ["*.geekhunter.com.br", "*.geekhunter.com"],
+    cookieDomains: ["geekhunter.com.br", ".geekhunter.com.br", "geekhunter.com", ".geekhunter.com"],
     authenticatedPaths: [/\/dashboard/i, /\/profile/i, /\/applications/i],
     authenticatedText: [/Meu perfil/i, /Minhas candidaturas/i, /Sair/i],
   }),

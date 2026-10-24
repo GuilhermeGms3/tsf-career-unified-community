@@ -38,7 +38,7 @@ export function createConnectionsObservabilityRoutes({auth,readiness,observabili
       const handoff=url.pathname.match(/^\/api\/connections\/handoff\/([^/]+)\/(claim|complete|event)$/);
       if(handoff&&req.method==='POST'){
         const input=await readJson(req,{limit:600000}),ticket=String(req.headers.authorization||'').replace(/^Bearer /,'');
-        json(res,handoff[2]==='claim'?auth.claim(handoff[1],ticket):handoff[2]==='event'?auth.runnerEvent(handoff[1],ticket,input):await auth.completeSession(handoff[1],ticket,input.state));return true;
+        json(res,handoff[2]==='claim'?auth.claim(handoff[1],ticket):handoff[2]==='event'?auth.runnerEvent(handoff[1],ticket,input):await auth.completeSession(handoff[1],ticket,input.state,{authenticatedUrl:String(input.authenticatedUrl||'')}));return true;
       }
       if(url.pathname==='/api/observability'&&req.method==='GET'){json(res,{ok:true,...observability.overview(Object.fromEntries(url.searchParams))});return true;}
       const problem=url.pathname.match(/^\/api\/observability\/problems\/([^/]+)$/);
